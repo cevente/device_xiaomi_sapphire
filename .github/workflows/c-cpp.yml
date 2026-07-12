@@ -40,7 +40,7 @@ jobs:
     - name: Shallow Sync Required Repositories
       run: |
         cd lineage
-        repo sync build/make system/core hardware/interfaces prebuilts/clang/host/linux-x86 --depth=1 -c -j$(nproc)
+        repo sync build/make system/core hardware/interfaces hardware/xiaomi prebuilts/clang/host/linux-x86 -c -j$(nproc)
 
     # 5. Inject your custom code into the specific folder structure expected by Android.bp
     - name: Checkout Custom Module
