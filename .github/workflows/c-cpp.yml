@@ -1,0 +1,65 @@
+name: Android UDFPS Module CI
+
+on:
+  push:
+    branches: [ "lineage-23.2" ]
+  pull_request:
+    branches: [ "lineage-23.2" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Clear up disk space on the GitHub server so the Android tree fits
+    - name: Maximize Build Space
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 20480
+        swap-size-mb: 1024
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+
+    # 2. Install essential Android building blocks
+    - name: Install Build Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf libxml2-utils lzop pngcrush repo rsyncd schedtool squashfs-tools xsltproc zip zlib1g-dev libssl-dev
+
+    # 3. Initialize the LineageOS 23.2 source tree (shallow clone to save space)
+    - name: Initialize Repo
+      run: |
+        git config --global user.name "CloudBuilder"
+        git config --global user.email "builder@cloud.local"
+        mkdir lineage
+        cd lineage
+        repo init -u https://github.com/LineageOS/android.git -b lineage-23.2 --depth=1
+
+    # 4. Sync ONLY the specific folders required to build a HAL module
+    - name: Shallow Sync Required Repositories
+      run: |
+        cd lineage
+        repo sync build/make system/core hardware/interfaces prebuilts/clang/host/linux-x86 --depth=1 -c -j$(nproc)
+
+    # 5. Inject your custom code into the specific folder structure expected by Android.bp
+    - name: Checkout Custom Module
+      uses: actions/checkout@v4
+      with:
+        path: lineage/hardware/xiaomi/fingerprint
+
+    # 6. Set up the Android build variables and compile just the module
+    - name: Compile Module
+      run: |
+        cd lineage
+        source build/envsetup.sh
+        lunch lineage_arm64-userdebug
+        # 'm' is the modern Android command that replaced legacy 'make'
+        m libudfpshandler -j$(nproc)
+
+    # 7. Save the compiled library so you can download it from the Actions tab
+    - name: Upload Compiled Binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: libudfpshandler-binary
+        path: lineage/out/target/product/generic_arm64/vendor/lib64/libudfpshandler.so
