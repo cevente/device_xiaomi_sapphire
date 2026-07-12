@@ -25,7 +25,7 @@ jobs:
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf libxml2-utils lzop pngcrush repo rsyncd schedtool squashfs-tools xsltproc zip zlib1g-dev libssl-dev
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf libxml2-utils lzop pngcrush repo rsync schedtool squashfs-tools xsltproc zip zlib1g-dev libssl-dev
 
     # 3. Initialize the LineageOS 23.2 source tree (shallow clone to save space)
     - name: Initialize Repo
