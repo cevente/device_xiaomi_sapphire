@@ -34,24 +34,29 @@ jobs:
         cd lineage
         repo init -u https://github.com/LineageOS/android.git -b lineage-23.2 --depth=1
 
-    # 4. Sync ONLY the generic frameworks that exist in the base tree
+    # 4. Sync frameworks AND the underlying Soong/Blueprint compilation tools
     - name: Shallow Sync Required Repositories
       run: |
         cd lineage
-        repo sync build/make system/core hardware/interfaces prebuilts/clang/host/linux-x86 -c -j$(nproc)
+        repo sync build/make build/soong build/blueprint prebuilts/build-tools system/core hardware/interfaces prebuilts/clang/host/linux-x86 -c -j$(nproc)
 
-    # 5. Manually clone the LineageOS Xiaomi hardware tree to get the required headers
+    # 5. Clone the LineageOS core configuration repo to enable Lineage targets
+    - name: Clone LineageOS Vendor Configuration
+      run: |
+        git clone --depth=1 https://github.com/LineageOS/android_vendor_lineage.git -b lineage-23.2 lineage/vendor/lineage
+
+    # 6. Manually clone the LineageOS Xiaomi hardware tree to get the required headers
     - name: Clone LineageOS Xiaomi Hardware Dependency
       run: |
         git clone --depth=1 https://github.com/LineageOS/android_hardware_xiaomi.git -b lineage-23.2 lineage/hardware/xiaomi
 
-    # 6. Checkout your custom code to a temporary directory
+    # 7. Checkout your custom code to a temporary directory
     - name: Checkout Custom Module
       uses: actions/checkout@v4
       with:
         path: custom_src
 
-    # 7. Safely inject your customized code over the base fingerprint implementation
+    # 8. Safely inject your customized code over the base fingerprint implementation
     - name: Inject Custom Code into Tree
       run: |
         cp -v custom_src/udfps/Android.bp lineage/hardware/xiaomi/fingerprint/
@@ -59,7 +64,7 @@ jobs:
         cp -v custom_src/udfps/xiaomi_touch.h lineage/hardware/xiaomi/fingerprint/
         [ -f custom_src/udfps/UdfpsHandler.h ] && cp -v custom_src/udfps/UdfpsHandler.h lineage/hardware/xiaomi/fingerprint/ || true
 
-    # 8. Set up the Android build variables and compile just the module
+    # 9. Set up the Android build variables and compile just the module
     - name: Compile Module
       run: |
         cd lineage
@@ -67,9 +72,9 @@ jobs:
         lunch lineage_arm64-userdebug
         m libudfpshandler -j$(nproc)
 
-    # 9. Save the compiled library
+    # 10. Save the compiled library (Updated path matching lineage_arm64 target)
     - name: Upload Compiled Binary
       uses: actions/upload-artifact@v4
       with:
         name: libudfpshandler-binary
-        path: lineage/out/target/product/generic_arm64/vendor/lib64/libudfpshandler.so
+        path: lineage/out/target/product/lineage_arm64/vendor/lib64/libudfpshandler.so
