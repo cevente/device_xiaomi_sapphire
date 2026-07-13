@@ -2,9 +2,9 @@ name: Android UDFPS Module CI
 
 on:
   push:
-    branches: [ "lineage-23.2" ]
+    branches: [ "lineage-21.0" ]
   pull_request:
-    branches: [ "lineage-23.2" ]
+    branches: [ "lineage-21.0" ]
   workflow_dispatch:
 
 jobs:
