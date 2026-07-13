@@ -99,6 +99,15 @@ jobs:
         echo -e "\n=== Directory structure ==="
         ls -la device/xiaomi/ vendor/xiaomi/ hardware/ 2>/dev/null || echo "Some directories may not exist"
 
+    - name: Stub Unneeded Hardware Deps
+      run: |
+        cd lineage
+        echo "Creating stub for Dolby Atmos (not needed for UDFPS build)..."
+        mkdir -p hardware/dolby
+        touch hardware/dolby/dolby.mk
+        echo "# Stub file to satisfy device.mk include" > hardware/dolby/dolby.mk
+        echo "Stub created successfully."
+
     - name: Build UDFPS Module
       run: |
         cd lineage
