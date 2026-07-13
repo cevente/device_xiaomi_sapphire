@@ -99,30 +99,22 @@ jobs:
         echo -e "\n=== Directory structure ==="
         ls -la device/xiaomi/ vendor/xiaomi/ hardware/ 2>/dev/null || echo "Some directories may not exist"
 
-    - name: Build UDFPS Module
+    - name: Build UDFPS Module (Direct)
       run: |
         cd lineage
         export ALLOW_MISSING_DEPENDENCIES=true
         source build/envsetup.sh
         
-        # Add the device to the lunch menu
-        echo "Adding device to lunch menu..."
-        add_lunch_combo lineage_sapphire-userdebug
-        
-        # Now lunch the device
-        echo "Lunching lineage_sapphire-userdebug..."
-        lunch lineage_sapphire-userdebug
-        
-        # Build the module
-        echo "Building libudfpshandler..."
-        m libudfpshandler -j$(nproc)
+        # Instead of lunch, just build the module using soong
+        echo "Building using soong..."
+        build/soong/soong_ui.bash --make-mode libudfpshandler -j$(nproc)
 
     - name: Upload Compiled Binary
       uses: actions/upload-artifact@v4
       if: success()
       with:
         name: libudfpshandler-sapphire
-        path: lineage/out/target/product/sapphire/vendor/lib64/libudfpshandler.so
+        path: lineage/out/target/product/*/vendor/lib64/libudfpshandler.so
 
     - name: Upload Build Logs (if failure)
       uses: actions/upload-artifact@v4
