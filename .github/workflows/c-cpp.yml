@@ -64,24 +64,24 @@ jobs:
         ~/bin/repo init -u https://github.com/LineageOS/android.git -b lineage-21.0 --depth=1 --no-repo-verify
         ~/bin/repo sync -c -j$(nproc) --no-clone-bundle --no-tags --force-sync
 
-    - name: Clone All Device Dependencies (Skip if exists)
+    - name: Clone All Device Dependencies
       run: |
         cd lineage
         
-        # Function to clone only if directory doesn't exist or is empty
+        # Function to clone with fallback
         clone_if_needed() {
           local repo_url=$1
           local target_path=$2
           local branch=$3
           
           if [ -d "$target_path" ] && [ "$(ls -A $target_path)" ]; then
-            echo "✓ $target_path already exists and is not empty, skipping..."
+            echo "✓ $target_path already exists, skipping..."
           else
             echo "Cloning $target_path from $repo_url..."
-            rm -rf "$target_path"  # Remove if exists but empty
+            rm -rf "$target_path"
             if [ -n "$branch" ]; then
               git clone --depth=1 "$repo_url" -b "$branch" "$target_path" || {
-                echo "⚠️ Branch '$branch' not found, trying default branch..."
+                echo "⚠️ Branch '$branch' not found, using default branch..."
                 git clone --depth=1 "$repo_url" "$target_path"
               }
             else
@@ -90,11 +90,8 @@ jobs:
           fi
         }
         
-        # Clone only if needed - Using correct branches
-        # hardware/xiaomi uses 'lineage-21.0' branch (check if exists, fallback to default)
+        # Clone device dependencies
         clone_if_needed "https://github.com/LineageOS/android_hardware_xiaomi.git" "hardware/xiaomi" "lineage-21.0"
-        
-        # Device trees - these may use 'lineage-21.0' or default branch
         clone_if_needed "https://github.com/cevente/device_xiaomi_sapphire.git" "device/xiaomi/sapphire" "lineage-21.0"
         clone_if_needed "https://github.com/The-Angel-Place-Sapphire/device_xiaomi_sapphire-kernel.git" "device/xiaomi/sapphire-kernel" ""
         clone_if_needed "https://github.com/The-Angel-Place-Sapphire/vendor_xiaomi_sapphire.git" "vendor/xiaomi/sapphire" ""
@@ -102,13 +99,14 @@ jobs:
         echo -e "\n=== Directory structure ==="
         ls -la device/xiaomi/ vendor/xiaomi/ hardware/ 2>/dev/null || echo "Some directories may not exist"
 
-    - name: Build UDFPS Module from Device Tree
+    - name: Build UDFPS Module
       run: |
         cd lineage
         export ALLOW_MISSING_DEPENDENCIES=true
         source build/envsetup.sh
-        lunch lineage_sapphire-userdebug
-        echo "Building libudfpshandler..."
+        lunch aosp_arm64-userdebug
+        # Add the module path to the build system
+        export BOARD_VNDK_VERSION=current
         m libudfpshandler -j$(nproc)
 
     - name: Upload Compiled Binary
@@ -116,7 +114,7 @@ jobs:
       if: success()
       with:
         name: libudfpshandler-sapphire
-        path: lineage/out/target/product/sapphire/vendor/lib64/libudfpshandler.so
+        path: lineage/out/target/product/*/vendor/lib64/libudfpshandler.so
 
     - name: Upload Build Logs (if failure)
       uses: actions/upload-artifact@v4
