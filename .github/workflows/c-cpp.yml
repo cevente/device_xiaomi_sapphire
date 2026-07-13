@@ -104,9 +104,17 @@ jobs:
         cd lineage
         export ALLOW_MISSING_DEPENDENCIES=true
         source build/envsetup.sh
-        lunch aosp_arm64-userdebug
-        # Add the module path to the build system
-        export BOARD_VNDK_VERSION=current
+        
+        # Add the device to the lunch menu
+        echo "Adding device to lunch menu..."
+        add_lunch_combo lineage_sapphire-userdebug
+        
+        # Now lunch the device
+        echo "Lunching lineage_sapphire-userdebug..."
+        lunch lineage_sapphire-userdebug
+        
+        # Build the module
+        echo "Building libudfpshandler..."
         m libudfpshandler -j$(nproc)
 
     - name: Upload Compiled Binary
@@ -114,7 +122,7 @@ jobs:
       if: success()
       with:
         name: libudfpshandler-sapphire
-        path: lineage/out/target/product/*/vendor/lib64/libudfpshandler.so
+        path: lineage/out/target/product/sapphire/vendor/lib64/libudfpshandler.so
 
     - name: Upload Build Logs (if failure)
       uses: actions/upload-artifact@v4
