@@ -54,10 +54,10 @@ jobs:
     # 7. Safely inject your customized code over the base fingerprint implementation
     - name: Inject Custom Code into Tree
       run: |
-        cp -v custom_src/Android.bp lineage/hardware/xiaomi/fingerprint/
-        cp -v custom_src/UdfpsHandler.cpp lineage/hardware/xiaomi/fingerprint/
-        cp -v custom_src/xiaomi_touch.h lineage/hardware/xiaomi/fingerprint/
-        [ -f custom_src/UdfpsHandler.h ] && cp -v custom_src/UdfpsHandler.h lineage/hardware/xiaomi/fingerprint/ || true
+        cp -v custom_src/udfps/Android.bp lineage/hardware/xiaomi/fingerprint/
+        cp -v custom_src/udfps/UdfpsHandler.cpp lineage/hardware/xiaomi/fingerprint/
+        cp -v custom_src/udfps/xiaomi_touch.h lineage/hardware/xiaomi/fingerprint/
+        [ -f custom_src/udfps/UdfpsHandler.h ] && cp -v custom_src/udfps/UdfpsHandler.h lineage/hardware/xiaomi/fingerprint/ || true
 
     # 8. Set up the Android build variables and compile just the module
     - name: Compile Module
