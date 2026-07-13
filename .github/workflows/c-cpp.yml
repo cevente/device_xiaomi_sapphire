@@ -10,6 +10,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # Add the repo binary directory to the PATH for every step
+      PATH: ${{ github.workspace }}/bin:{{ env.PATH }}
 
     steps:
     - name: Free Disk Space
@@ -25,23 +28,25 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev libssl-dev python-is-python3
 
-    - name: Initialize Repo
+    - name: Setup Repo Tool
+      run: |
+        mkdir -p ~/bin
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+        chmod a+x ~/bin/repo
+        # Add to PATH for this job
+        echo "$HOME/bin" >> $GITHUB_PATH
+
+    - name: Initialize and Sync
       run: |
         git config --global user.name "CloudBuilder"
         git config --global user.email "builder@cloud.local"
         mkdir -p lineage
         cd lineage
         repo init -u https://github.com/LineageOS/android.git -b lineage-21.0 --depth=1
-
-    - name: Full Shallow Sync
-      run: |
-        cd lineage
         repo sync -c -j$(nproc) --no-clone-bundle --no-tags
 
-    - name: Clone Dependencies (Strictly lineage-21.0)
+    - name: Clone Dependencies
       run: |
-        # Ensure versions match manifest
-        rm -rf lineage/vendor/lineage lineage/hardware/xiaomi
         git clone --depth=1 https://github.com/LineageOS/android_vendor_lineage.git -b lineage-21.0 lineage/vendor/lineage
         git clone --depth=1 https://github.com/LineageOS/android_hardware_xiaomi.git -b lineage-21.0 lineage/hardware/xiaomi
 
@@ -60,17 +65,9 @@ jobs:
     - name: Compile Module
       run: |
         cd lineage
-        # 1. Set environment variables to ignore missing device trees
         export ALLOW_MISSING_DEPENDENCIES=true
-        export LC_ALL=C
-        
-        # 2. Source setup
         source build/envsetup.sh
-        
-        # 3. Use a generic target that exists in all trees
         lunch aosp_arm64-userdebug
-        
-        # 4. Build the module
         m libudfpshandler -j$(nproc)
 
     - name: Upload Compiled Binary
