@@ -31,9 +31,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: lineage
-        key: lineage-23.2-minimal-v3
+        key: lineage-23.2-minimal-v4
 
-    # 4. Initialize the LineageOS 23.2 tree (Only runs if the cache is empty)
+    # 4. Initialize the LineageOS tree (Only runs if cache is empty)
     - name: Initialize Repo
       if: steps.cache-lineage.outputs.cache-hit != 'true'
       run: |
@@ -49,19 +49,25 @@ jobs:
         cd lineage
         repo sync build/make build/soong build/blueprint prebuilts/build-tools system/core hardware/interfaces prebuilts/clang/host/linux-x86 -c -j$(nproc)
 
-    # 6. Clean and clone Xiaomi hardware tree to get the required headers
+    # 6. Clone LineageOS Vendor Configuration (REQUIRED so envsetup.sh doesn't crash)
+    - name: Clone LineageOS Vendor Configuration
+      run: |
+        rm -rf lineage/vendor/lineage
+        git clone --depth=1 https://github.com/LineageOS/android_vendor_lineage.git -b lineage-23.2 lineage/vendor/lineage
+
+    # 7. Clone Xiaomi hardware tree to get the required headers
     - name: Clone LineageOS Xiaomi Hardware Dependency
       run: |
         rm -rf lineage/hardware/xiaomi
         git clone --depth=1 https://github.com/LineageOS/android_hardware_xiaomi.git -b lineage-23.2 lineage/hardware/xiaomi
 
-    # 7. Checkout your custom code to a temporary directory
+    # 8. Checkout your custom code to a temporary directory
     - name: Checkout Custom Module
       uses: actions/checkout@v4
       with:
         path: custom_src
 
-    # 8. Inject your customized code over the base fingerprint implementation
+    # 9. Inject your customized code over the base fingerprint implementation
     - name: Inject Custom Code into Tree
       run: |
         cp -v custom_src/udfps/Android.bp lineage/hardware/xiaomi/fingerprint/
@@ -69,7 +75,7 @@ jobs:
         cp -v custom_src/udfps/xiaomi_touch.h lineage/hardware/xiaomi/fingerprint/
         [ -f custom_src/udfps/UdfpsHandler.h ] && cp -v custom_src/udfps/UdfpsHandler.h lineage/hardware/xiaomi/fingerprint/ || true
 
-    # 9. Set up the Android build variables and compile just the module
+    # 10. Set up the Android build variables and compile just the module
     - name: Compile Module
       run: |
         cd lineage
@@ -77,9 +83,9 @@ jobs:
         lunch aosp_arm64-trunk_staging-userdebug
         m libudfpshandler -j$(nproc)
 
-    # 10. Save the compiled library
+    # 11. Save the compiled library using a wildcard path
     - name: Upload Compiled Binary
       uses: actions/upload-artifact@v4
       with:
         name: libudfpshandler-binary
-        path: lineage/out/target/product/generic_arm64/vendor/lib64/libudfpshandler.so
+        path: lineage/out/target/product/*/vendor/lib64/libudfpshandler.so
