@@ -54,7 +54,6 @@ jobs:
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
-        # Minimal dependencies needed for building
         sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev libssl-dev python-is-python3
         sudo apt-get install -y repo || true
 
@@ -72,9 +71,7 @@ jobs:
         git config --global user.email "builder@cloud.local"
         mkdir -p lineage
         cd lineage
-        # Use shallow clone to save space
         ~/bin/repo init -u https://github.com/LineageOS/android.git -b lineage-23.2 --depth=1 --no-repo-verify
-        # Sync only what's needed for the build
         ~/bin/repo sync -c -j$(nproc) --no-clone-bundle --no-tags --force-sync --no-repo-verify
 
     - name: Clone Device Dependencies (Shallow)
@@ -83,20 +80,36 @@ jobs:
         
         echo "Cloning Device Trees for Sapphire (shallow)..."
         
-        # Clone all device repos with shallow depth and only the needed branches
+        # Clone device repos with check
+        [ -d "device/xiaomi/sapphire-kernel" ] && rm -rf device/xiaomi/sapphire-kernel
         git clone --depth 1 -b lineage-23.2 https://github.com/The-Angel-Place-Sapphire/device_xiaomi_sapphire-kernel.git device/xiaomi/sapphire-kernel
+        
+        [ -d "device/xiaomi/sepolicy" ] && rm -rf device/xiaomi/sepolicy
         git clone --depth 1 -b 16 https://github.com/The-Angel-Place-Sapphire/device_xiaomi_sepolicy.git device/xiaomi/sepolicy
+        
+        [ -d "device/xiaomi/sapphire" ] && rm -rf device/xiaomi/sapphire
         git clone --depth 1 -b lineage-23.2 https://github.com/The-Angel-Place-Sapphire/device_xiaomi_sapphire.git device/xiaomi/sapphire
+        
+        [ -d "vendor/xiaomi/sapphire" ] && rm -rf vendor/xiaomi/sapphire
         git clone --depth 1 -b lineage-23.2 https://github.com/The-Angel-Place-Sapphire/vendor_xiaomi_sapphire.git vendor/xiaomi/sapphire
+        
+        [ -d "hardware/xiaomi" ] && rm -rf hardware/xiaomi
         git clone --depth 1 -b lineage-23.2 https://github.com/The-Angel-Place-Sapphire/android_hardware_xiaomi.git hardware/xiaomi
+        
+        [ -d "hardware/dolby" ] && rm -rf hardware/dolby
         git clone --depth 1 -b 16 https://github.com/The-Angel-Place-Sapphire/hardware_dolby.git hardware/dolby
         
         echo "============================"
         echo "Device Trees cloned successfully"
         echo "============================"
         
-        # Clone HALs for SM6225 (shallow)
+        # Clone HALs for SM6225 with directory checks
         echo "Cloning HALs for SM6225 (shallow)..."
+        
+        # Remove existing directories first
+        rm -rf hardware/qcom-caf/common
+        rm -rf hardware/qcom-caf/sm6225
+        rm -rf device/qcom/sepolicy_vndr/sm6225
         
         mkdir -p hardware/qcom-caf/sm6225/audio
         mkdir -p device/qcom/sepolicy_vndr
@@ -115,10 +128,9 @@ jobs:
         echo "HALs cloned successfully"
         echo "============================"
         
-        # Show disk usage
         echo "Disk usage after cloning:"
         df -h /
-        du -sh lineage/
+        du -sh lineage/ 2>/dev/null || echo "Size check skipped"
 
     - name: Build UDFPS Module
       run: |
@@ -126,11 +138,9 @@ jobs:
         export ALLOW_MISSING_DEPENDENCIES=true
         source build/envsetup.sh
         
-        # Use lineage-23.2 compatible release config
         echo "Setting up build environment with lunch..."
         lunch lineage_sapphire-bp4a-userdebug
         
-        # Build only the UDFPS module to save time and space
         echo "Building libudfpshandler..."
         build/soong/soong_ui.bash --make-mode libudfpshandler -j$(nproc)
 
