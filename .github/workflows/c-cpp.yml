@@ -99,14 +99,18 @@ jobs:
         echo -e "\n=== Directory structure ==="
         ls -la device/xiaomi/ vendor/xiaomi/ hardware/ 2>/dev/null || echo "Some directories may not exist"
 
-    - name: Build UDFPS Module (Direct)
+    - name: Build UDFPS Module
       run: |
         cd lineage
         export ALLOW_MISSING_DEPENDENCIES=true
         source build/envsetup.sh
         
-        # Instead of lunch, just build the module using soong
-        echo "Building using soong..."
+        # Use the correct lunch combo with release config
+        echo "Setting up build environment with lunch..."
+        lunch lineage_sapphire-ap2a-userdebug
+        
+        # Build the module using soong
+        echo "Building libudfpshandler..."
         build/soong/soong_ui.bash --make-mode libudfpshandler -j$(nproc)
 
     - name: Upload Compiled Binary
