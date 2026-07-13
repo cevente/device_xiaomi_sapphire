@@ -61,7 +61,6 @@ jobs:
         git config --global user.email "builder@cloud.local"
         mkdir -p lineage
         cd lineage
-        # Bump to lineage-23.2 to match device trees
         ~/bin/repo init -u https://github.com/LineageOS/android.git -b lineage-23.2 --depth=1 --no-repo-verify
         ~/bin/repo sync -c -j$(nproc) --no-clone-bundle --no-tags --force-sync
 
@@ -87,7 +86,8 @@ jobs:
         git clone --depth 1 -b lineage-23.2 https://github.com/The-Angel-Place-Sapphire/android_hardware_xiaomi.git hardware/xiaomi
         
         rm -rf hardware/dolby
-        git clone --depth 1 -b lineage-23.2 https://github.com/The-Angel-Place-Sapphire/hardware_dolby.git hardware/dolby
+        # Dolby uses branch "16", not lineage-23.2
+        git clone --depth 1 -b 16 https://github.com/The-Angel-Place-Sapphire/hardware_dolby.git hardware/dolby
         
         echo "============================"
         echo "Device Trees cloned successfully"
