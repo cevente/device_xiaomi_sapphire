@@ -31,7 +31,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: lineage
-        key: lineage-23.2-minimal-v4
+        key: lineage-23.2-minimal-v5
 
     # 4. Initialize the LineageOS tree (Only runs if cache is empty)
     - name: Initialize Repo
@@ -43,13 +43,13 @@ jobs:
         cd lineage
         repo init -u https://github.com/LineageOS/android.git -b lineage-23.2 --depth=1
 
-    # 5. Sync folders (If cached, this instantly finishes in seconds)
+    # 5. Sync folders (Added build/release, Go compiler, bionic, and libbase)
     - name: Shallow Sync Required Repositories
       run: |
         cd lineage
-        repo sync build/make build/soong build/blueprint prebuilts/build-tools system/core hardware/interfaces prebuilts/clang/host/linux-x86 -c -j$(nproc)
+        repo sync build/make build/soong build/blueprint build/release prebuilts/build-tools prebuilts/go/linux-x86 prebuilts/clang/host/linux-x86 system/core system/libbase system/logging hardware/interfaces bionic -c -j$(nproc)
 
-    # 6. Clone LineageOS Vendor Configuration (REQUIRED so envsetup.sh doesn't crash)
+    # 6. Clone LineageOS Vendor Configuration
     - name: Clone LineageOS Vendor Configuration
       run: |
         rm -rf lineage/vendor/lineage
@@ -80,10 +80,11 @@ jobs:
       run: |
         cd lineage
         source build/envsetup.sh
-        lunch aosp_arm64-trunk_staging-userdebug
+        # Provide fallback targets to ensure it satisfies Android 14 release flags
+        lunch lineage_arm64-ap3a-userdebug || lunch lineage_arm64-trunk_staging-userdebug || lunch lineage_arm64-userdebug
         m libudfpshandler -j$(nproc)
 
-    # 11. Save the compiled library using a wildcard path
+    # 11. Save the compiled library
     - name: Upload Compiled Binary
       uses: actions/upload-artifact@v4
       with:
