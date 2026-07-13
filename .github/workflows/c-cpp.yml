@@ -78,12 +78,13 @@ jobs:
         cp -v custom_src/udfps/xiaomi_touch.h lineage/hardware/xiaomi/fingerprint/
         [ -f custom_src/udfps/UdfpsHandler.h ] && cp -v custom_src/udfps/UdfpsHandler.h lineage/hardware/xiaomi/fingerprint/ || true
 
-    # 9. Set up build variables and compile the module
+    # 9. Set up the Android build variables and compile just the module
     - name: Compile Module
       run: |
         cd lineage
         source build/envsetup.sh
-        lunch lineage_arm64-userdebug
+        # Updated lunch target for Android 16 (Lineage 23.x)
+        lunch lineage_arm64-trunk_staging-userdebug
         m libudfpshandler -j$(nproc)
 
     # 10. Save the compiled library
