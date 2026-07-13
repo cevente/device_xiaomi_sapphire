@@ -61,52 +61,74 @@ jobs:
         git config --global user.email "builder@cloud.local"
         mkdir -p lineage
         cd lineage
-        ~/bin/repo init -u https://github.com/LineageOS/android.git -b lineage-21.0 --depth=1 --no-repo-verify
+        # Bump to lineage-23.2 to match device trees
+        ~/bin/repo init -u https://github.com/LineageOS/android.git -b lineage-23.2 --depth=1 --no-repo-verify
         ~/bin/repo sync -c -j$(nproc) --no-clone-bundle --no-tags --force-sync
 
     - name: Clone All Device Dependencies
       run: |
         cd lineage
         
-        # Function to clone with fallback
-        clone_if_needed() {
-          local repo_url=$1
-          local target_path=$2
-          local branch=$3
-          
-          if [ -d "$target_path" ] && [ "$(ls -A $target_path)" ]; then
-            echo "✓ $target_path already exists, skipping..."
-          else
-            echo "Cloning $target_path from $repo_url..."
-            rm -rf "$target_path"
-            if [ -n "$branch" ]; then
-              git clone --depth=1 "$repo_url" -b "$branch" "$target_path" || {
-                echo "⚠️ Branch '$branch' not found, using default branch..."
-                git clone --depth=1 "$repo_url" "$target_path"
-              }
-            else
-              git clone --depth=1 "$repo_url" "$target_path"
-            fi
-          fi
-        }
+        echo "Cloning Device Trees for Sapphire..."
         
-        # Clone device dependencies
-        clone_if_needed "https://github.com/LineageOS/android_hardware_xiaomi.git" "hardware/xiaomi" "lineage-21.0"
-        clone_if_needed "https://github.com/cevente/device_xiaomi_sapphire.git" "device/xiaomi/sapphire" "lineage-21.0"
-        clone_if_needed "https://github.com/The-Angel-Place-Sapphire/device_xiaomi_sapphire-kernel.git" "device/xiaomi/sapphire-kernel" ""
-        clone_if_needed "https://github.com/The-Angel-Place-Sapphire/vendor_xiaomi_sapphire.git" "vendor/xiaomi/sapphire" ""
+        rm -rf device/xiaomi/sapphire-kernel
+        git clone --depth 1 -b lineage-23.2 https://github.com/The-Angel-Place-Sapphire/device_xiaomi_sapphire-kernel.git device/xiaomi/sapphire-kernel
+        
+        rm -rf device/xiaomi/sepolicy
+        git clone --depth 1 -b 16 https://github.com/The-Angel-Place-Sapphire/device_xiaomi_sepolicy.git device/xiaomi/sepolicy
+        
+        rm -rf device/xiaomi/sapphire
+        git clone --depth 1 -b lineage-23.2 https://github.com/The-Angel-Place-Sapphire/device_xiaomi_sapphire.git device/xiaomi/sapphire
+        
+        rm -rf vendor/xiaomi/sapphire
+        git clone --depth 1 -b lineage-23.2 https://github.com/The-Angel-Place-Sapphire/vendor_xiaomi_sapphire.git vendor/xiaomi/sapphire
+        
+        rm -rf hardware/xiaomi
+        git clone --depth 1 -b lineage-23.2 https://github.com/The-Angel-Place-Sapphire/android_hardware_xiaomi.git hardware/xiaomi
+        
+        rm -rf hardware/dolby
+        git clone --depth 1 -b lineage-23.2 https://github.com/The-Angel-Place-Sapphire/hardware_dolby.git hardware/dolby
+        
+        echo "============================"
+        echo "Device Trees cloned successfully"
+        echo "============================"
+        
+        # Clone HALs for SM6225
+        echo "Cloning HALs for SM6225..."
+        
+        rm -rf hardware/qcom-caf/common
+        git clone --depth 1 -b lineage-23.2 https://github.com/sapphire-sm6225/android_hardware_qcom-caf_common.git hardware/qcom-caf/common
+        
+        rm -rf hardware/qcom-caf/sm6225/audio/agm
+        git clone --depth 1 -b lineage-22.2-caf-sm6225 https://github.com/sapphire-sm6225/vendor_qcom_opensource_agm.git hardware/qcom-caf/sm6225/audio/agm
+        
+        rm -rf hardware/qcom-caf/sm6225/audio/pal
+        git clone --depth 1 -b lineage-22.0-caf-sm6225 https://github.com/sapphire-sm6225/vendor_qcom_opensource_arpal-lx.git hardware/qcom-caf/sm6225/audio/pal
+        
+        rm -rf hardware/qcom-caf/sm6225/data-ipa-cfg-mgr
+        git clone --depth 1 -b lineage-22.0-caf-sm6225 https://github.com/sapphire-sm6225/vendor_qcom_opensource_data-ipa-cfg-mgr.git hardware/qcom-caf/sm6225/data-ipa-cfg-mgr
+        
+        rm -rf hardware/qcom-caf/sm6225/dataipa
+        git clone --depth 1 -b lineage-22.0-caf-sm6225 https://github.com/sapphire-sm6225/vendor_qcom_opensource_dataipa.git hardware/qcom-caf/sm6225/dataipa
+        
+        rm -rf hardware/qcom-caf/sm6225/display
+        git clone --depth 1 -b lineage-22.0-caf-sm6225 https://github.com/sapphire-sm6225/hardware_qcom_display.git hardware/qcom-caf/sm6225/display
+        
+        rm -rf hardware/qcom-caf/sm6225/media
+        git clone --depth 1 -b lineage-22.0-caf-sm6225 https://github.com/sapphire-sm6225/hardware_qcom_media.git hardware/qcom-caf/sm6225/media
+        
+        rm -rf hardware/qcom-caf/sm6225/audio/primary-hal
+        git clone --depth 1 -b lineage-22.0-caf-sm6225 https://github.com/sapphire-sm6225/hardware_qcom_audio.git hardware/qcom-caf/sm6225/audio/primary-hal
+        
+        rm -rf device/qcom/sepolicy_vndr/sm6225
+        git clone --depth 1 -b lineage-23.0-caf-sm6225 https://github.com/sapphire-sm6225/device_qcom_sepolicy_vndr.git device/qcom/sepolicy_vndr/sm6225
+        
+        echo "============================"
+        echo "HALs cloned successfully"
+        echo "============================"
         
         echo -e "\n=== Directory structure ==="
         ls -la device/xiaomi/ vendor/xiaomi/ hardware/ 2>/dev/null || echo "Some directories may not exist"
-
-    - name: Stub Unneeded Hardware Deps
-      run: |
-        cd lineage
-        echo "Creating stub for Dolby Atmos (not needed for UDFPS build)..."
-        mkdir -p hardware/dolby
-        touch hardware/dolby/dolby.mk
-        echo "# Stub file to satisfy device.mk include" > hardware/dolby/dolby.mk
-        echo "Stub created successfully."
 
     - name: Build UDFPS Module
       run: |
@@ -114,9 +136,9 @@ jobs:
         export ALLOW_MISSING_DEPENDENCIES=true
         source build/envsetup.sh
         
-        # Use the correct lunch combo with release config
+        # Use lineage-23.2 compatible release config
         echo "Setting up build environment with lunch..."
-        lunch lineage_sapphire-ap2a-userdebug
+        lunch lineage_sapphire-bp4a-userdebug
         
         # Build the module using soong
         echo "Building libudfpshandler..."
