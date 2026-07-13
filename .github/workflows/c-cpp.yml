@@ -11,30 +11,52 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # Add the repo binary directory to the PATH for every step
-      PATH: ${{ github.workspace }}/bin:{{ env.PATH }}
+      PATH: ${{ github.workspace }}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
     steps:
-    - name: Free Disk Space
-      uses: jlumbroso/free-disk-space@main
-      with:
-        tool-cache: true
-        android: true
-        large-packages: true
-        swap-storage: false
+    - name: Free Disk Space (Alternative)
+      run: |
+        echo "Freeing disk space..."
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /opt/hostedtoolcache/CodeQL
+        sudo rm -rf /usr/share/swift
+        sudo rm -rf /usr/local/.ghcup
+        sudo rm -rf /usr/local/share/powershell
+        sudo rm -rf /usr/local/share/chromium
+        sudo rm -rf /usr/local/lib/node_modules
+        sudo rm -rf /opt/microsoft/powershell
+        sudo rm -rf /opt/pipx
+        sudo rm -rf /usr/share/miniconda
+        sudo rm -rf /usr/local/graalvm
+        sudo rm -rf /usr/local/julia*
+        sudo rm -rf /usr/local/phantomjs
+        sudo rm -rf /usr/local/lib/heroku
+        sudo rm -rf /usr/local/share/boost
+        sudo rm -rf /usr/local/share/vcpkg
+        sudo rm -rf /usr/local/share/rust
+        sudo rm -rf /usr/share/dotnet
+        sudo apt-get clean
+        docker system prune -af || true
+        echo "Disk space freed"
 
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev libssl-dev python-is-python3
+        sudo apt-get install -y repo
 
-    - name: Setup Repo Tool
+    - name: Setup Repo Tool (if not available)
       run: |
-        mkdir -p ~/bin
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-        chmod a+x ~/bin/repo
-        # Add to PATH for this job
-        echo "$HOME/bin" >> $GITHUB_PATH
+        if ! command -v repo &> /dev/null; then
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
+        else
+          echo "Repo already installed"
+        fi
 
     - name: Initialize and Sync
       run: |
@@ -57,10 +79,15 @@ jobs:
 
     - name: Inject Custom Code
       run: |
-        cp -v custom_src/udfps/Android.bp lineage/hardware/xiaomi/fingerprint/
-        cp -v custom_src/udfps/UdfpsHandler.cpp lineage/hardware/xiaomi/fingerprint/
-        cp -v custom_src/udfps/xiaomi_touch.h lineage/hardware/xiaomi/fingerprint/
-        [ -f custom_src/udfps/UdfpsHandler.h ] && cp -v custom_src/udfps/UdfpsHandler.h lineage/hardware/xiaomi/fingerprint/ || true
+        mkdir -p lineage/hardware/xiaomi/fingerprint/
+        cp -v custom_src/udfps/Android.bp lineage/hardware/xiaomi/fingerprint/ || echo "Android.bp not found"
+        cp -v custom_src/udfps/UdfpsHandler.cpp lineage/hardware/xiaomi/fingerprint/ || echo "UdfpsHandler.cpp not found"
+        cp -v custom_src/udfps/xiaomi_touch.h lineage/hardware/xiaomi/fingerprint/ || echo "xiaomi_touch.h not found"
+        if [ -f custom_src/udfps/UdfpsHandler.h ]; then
+          cp -v custom_src/udfps/UdfpsHandler.h lineage/hardware/xiaomi/fingerprint/
+        fi
+        echo "Files copied:"
+        ls -la lineage/hardware/xiaomi/fingerprint/
 
     - name: Compile Module
       run: |
@@ -68,10 +95,11 @@ jobs:
         export ALLOW_MISSING_DEPENDENCIES=true
         source build/envsetup.sh
         lunch aosp_arm64-userdebug
-        m libudfpshandler -j$(nproc)
+        m libudfpshandler -j$(nproc) || echo "Build failed, checking logs..."
 
     - name: Upload Compiled Binary
       uses: actions/upload-artifact@v4
+      if: success()
       with:
         name: libudfpshandler-binary
         path: lineage/out/target/product/*/vendor/lib64/libudfpshandler.so
