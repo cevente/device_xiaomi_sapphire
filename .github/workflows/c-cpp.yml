@@ -45,18 +45,15 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev libssl-dev python-is-python3
-        sudo apt-get install -y repo
+        sudo apt-get install -y repo || true
 
-    - name: Setup Repo Tool (if not available)
+    - name: Setup Repo Tool (Local)
       run: |
-        if ! command -v repo &> /dev/null; then
-          mkdir -p ~/bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-          chmod a+x ~/bin/repo
-          echo "$HOME/bin" >> $GITHUB_PATH
-        else
-          echo "Repo already installed"
-        fi
+        mkdir -p ~/bin
+        curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+        chmod a+x ~/bin/repo
+        echo "$HOME/bin" >> $GITHUB_PATH
+        ~/bin/repo --version
 
     - name: Initialize and Sync
       run: |
@@ -64,42 +61,63 @@ jobs:
         git config --global user.email "builder@cloud.local"
         mkdir -p lineage
         cd lineage
-        repo init -u https://github.com/LineageOS/android.git -b lineage-21.0 --depth=1
-        repo sync -c -j$(nproc) --no-clone-bundle --no-tags
+        ~/bin/repo init -u https://github.com/LineageOS/android.git -b lineage-21.0 --depth=1 --no-repo-verify
+        ~/bin/repo sync -c -j$(nproc) --no-clone-bundle --no-tags --force-sync
 
-    - name: Clone Dependencies
+    - name: Clone All Device Dependencies (Skip if exists)
       run: |
-        git clone --depth=1 https://github.com/LineageOS/android_vendor_lineage.git -b lineage-21.0 lineage/vendor/lineage
-        git clone --depth=1 https://github.com/LineageOS/android_hardware_xiaomi.git -b lineage-21.0 lineage/hardware/xiaomi
+        cd lineage
+        
+        # Function to clone only if directory doesn't exist or is empty
+        clone_if_needed() {
+          local repo_url=$1
+          local target_path=$2
+          local branch=$3
+          
+          if [ -d "$target_path" ] && [ "$(ls -A $target_path)" ]; then
+            echo "✓ $target_path already exists and is not empty, skipping..."
+          else
+            echo "Cloning $target_path..."
+            rm -rf "$target_path"  # Remove if exists but empty
+            if [ -n "$branch" ]; then
+              git clone --depth=1 "$repo_url" -b "$branch" "$target_path"
+            else
+              git clone --depth=1 "$repo_url" "$target_path"
+            fi
+          fi
+        }
+        
+        # Clone only if needed
+        clone_if_needed "https://github.com/LineageOS/android_hardware_xiaomi.git" "hardware/xiaomi" "lineage-21.0"
+        clone_if_needed "https://github.com/cevente/device_xiaomi_sapphire.git" "device/xiaomi/sapphire" ""
+        clone_if_needed "https://github.com/The-Angel-Place-Sapphire/device_xiaomi_sapphire-kernel.git" "device/xiaomi/sapphire-kernel" ""
+        clone_if_needed "https://github.com/The-Angel-Place-Sapphire/vendor_xiaomi_sapphire.git" "vendor/xiaomi/sapphire" ""
+        
+        echo -e "\n=== Directory structure ==="
+        ls -la device/xiaomi/ vendor/xiaomi/ hardware/ 2>/dev/null || echo "Some directories may not exist"
 
-    - name: Checkout Custom Module
-      uses: actions/checkout@v4
-      with:
-        path: custom_src
-
-    - name: Inject Custom Code
-      run: |
-        mkdir -p lineage/hardware/xiaomi/fingerprint/
-        cp -v custom_src/udfps/Android.bp lineage/hardware/xiaomi/fingerprint/ || echo "Android.bp not found"
-        cp -v custom_src/udfps/UdfpsHandler.cpp lineage/hardware/xiaomi/fingerprint/ || echo "UdfpsHandler.cpp not found"
-        cp -v custom_src/udfps/xiaomi_touch.h lineage/hardware/xiaomi/fingerprint/ || echo "xiaomi_touch.h not found"
-        if [ -f custom_src/udfps/UdfpsHandler.h ]; then
-          cp -v custom_src/udfps/UdfpsHandler.h lineage/hardware/xiaomi/fingerprint/
-        fi
-        echo "Files copied:"
-        ls -la lineage/hardware/xiaomi/fingerprint/
-
-    - name: Compile Module
+    - name: Build UDFPS Module from Device Tree
       run: |
         cd lineage
         export ALLOW_MISSING_DEPENDENCIES=true
         source build/envsetup.sh
-        lunch aosp_arm64-userdebug
-        m libudfpshandler -j$(nproc) || echo "Build failed, checking logs..."
+        lunch lineage_sapphire-userdebug
+        echo "Building libudfpshandler..."
+        m libudfpshandler -j$(nproc)
 
     - name: Upload Compiled Binary
       uses: actions/upload-artifact@v4
       if: success()
       with:
-        name: libudfpshandler-binary
-        path: lineage/out/target/product/*/vendor/lib64/libudfpshandler.so
+        name: libudfpshandler-sapphire
+        path: lineage/out/target/product/sapphire/vendor/lib64/libudfpshandler.so
+
+    - name: Upload Build Logs (if failure)
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: build-logs
+        path: |
+          lineage/out/error.log
+          lineage/out/build.log
+          lineage/out/.module_paths/Android.bp.list
