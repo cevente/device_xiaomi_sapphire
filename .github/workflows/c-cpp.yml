@@ -12,33 +12,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. Safely clear ~30GB of space to ensure we can hold the full source tree
     - name: Free Disk Space
       uses: jlumbroso/free-disk-space@main
       with:
         tool-cache: true
         android: true
-        dotnet: true
-        haskell: true
         large-packages: true
-        docker-images: true
         swap-storage: false
 
-    # 2. Install essential Android building blocks
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev libssl-dev python-is-python3
 
-    # 3. Fetch the absolute latest Repo tool from Google
-    - name: Install Latest Repo Tool
-      run: |
-        mkdir -p ~/.bin
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
-        chmod a+x ~/.bin/repo
-        sudo mv ~/.bin/repo /usr/local/bin/repo
-
-    # 4. Initialize the OFFICIAL LineageOS 21.0 tree
     - name: Initialize Repo
       run: |
         git config --global user.name "CloudBuilder"
@@ -47,30 +33,23 @@ jobs:
         cd lineage
         repo init -u https://github.com/LineageOS/android.git -b lineage-21.0 --depth=1
 
-    # 5. Full Shallow Sync (Downloads core framework files)
     - name: Full Shallow Sync
       run: |
         cd lineage
         repo sync -c -j$(nproc) --no-clone-bundle --no-tags
 
-    # 6. Clone LineageOS Vendor and Xiaomi Hardware (Ensuring clean folders)
-    - name: Clone LineageOS Vendor and Xiaomi Hardware
+    - name: Clone Dependencies (Strictly lineage-21.0)
       run: |
-        # Clean up existing directories to prevent "already exists" errors
-        rm -rf lineage/vendor/lineage
-        rm -rf lineage/hardware/xiaomi
-        
-        # Clone matching the 23.2 branch (Ensure these branches exist on the remote)
-        git clone --depth=1 https://github.com/LineageOS/android_vendor_lineage.git -b lineage-23.2 lineage/vendor/lineage
-        git clone --depth=1 https://github.com/LineageOS/android_hardware_xiaomi.git -b lineage-23.2 lineage/hardware/xiaomi
+        # Ensure versions match manifest
+        rm -rf lineage/vendor/lineage lineage/hardware/xiaomi
+        git clone --depth=1 https://github.com/LineageOS/android_vendor_lineage.git -b lineage-21.0 lineage/vendor/lineage
+        git clone --depth=1 https://github.com/LineageOS/android_hardware_xiaomi.git -b lineage-21.0 lineage/hardware/xiaomi
 
-    # 7. Checkout your custom code
     - name: Checkout Custom Module
       uses: actions/checkout@v4
       with:
         path: custom_src
 
-    # 8. Inject custom code into the build tree
     - name: Inject Custom Code
       run: |
         cp -v custom_src/udfps/Android.bp lineage/hardware/xiaomi/fingerprint/
@@ -78,16 +57,22 @@ jobs:
         cp -v custom_src/udfps/xiaomi_touch.h lineage/hardware/xiaomi/fingerprint/
         [ -f custom_src/udfps/UdfpsHandler.h ] && cp -v custom_src/udfps/UdfpsHandler.h lineage/hardware/xiaomi/fingerprint/ || true
 
-    # 9. Set up the Android build variables and compile just the module
     - name: Compile Module
       run: |
         cd lineage
+        # 1. Set environment variables to ignore missing device trees
+        export ALLOW_MISSING_DEPENDENCIES=true
+        export LC_ALL=C
+        
+        # 2. Source setup
         source build/envsetup.sh
-        # Updated lunch target for Android 16 (Lineage 23.x)
-        lunch lineage_arm64-trunk_staging-userdebug
+        
+        # 3. Use a generic target that exists in all trees
+        lunch aosp_arm64-userdebug
+        
+        # 4. Build the module
         m libudfpshandler -j$(nproc)
 
-    # 10. Save the compiled library
     - name: Upload Compiled Binary
       uses: actions/upload-artifact@v4
       with:
