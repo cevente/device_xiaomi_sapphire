@@ -53,11 +53,16 @@ jobs:
         cd lineage
         repo sync -c -j$(nproc) --no-clone-bundle --no-tags
 
-    # 6. Clone Vendor/Xiaomi dependencies to fix "envsetup" and "header" errors
+    # 6. Clone LineageOS Vendor and Xiaomi Hardware (Ensuring clean folders)
     - name: Clone LineageOS Vendor and Xiaomi Hardware
       run: |
-        git clone --depth=1 https://github.com/LineageOS/android_vendor_lineage.git -b lineage-21.0 lineage/vendor/lineage
-        git clone --depth=1 https://github.com/LineageOS/android_hardware_xiaomi.git -b lineage-21.0 lineage/hardware/xiaomi
+        # Clean up existing directories to prevent "already exists" errors
+        rm -rf lineage/vendor/lineage
+        rm -rf lineage/hardware/xiaomi
+        
+        # Clone matching the 23.2 branch (Ensure these branches exist on the remote)
+        git clone --depth=1 https://github.com/LineageOS/android_vendor_lineage.git -b lineage-23.2 lineage/vendor/lineage
+        git clone --depth=1 https://github.com/LineageOS/android_hardware_xiaomi.git -b lineage-23.2 lineage/hardware/xiaomi
 
     # 7. Checkout your custom code
     - name: Checkout Custom Module
