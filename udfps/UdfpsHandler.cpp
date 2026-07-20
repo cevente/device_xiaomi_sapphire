@@ -176,8 +176,12 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 }
             }
             
+            // Hard kill HBM as a fallback
+            killHbm();
+            
             if (!enrolling.load()) {
                 setFodStatus(FOD_STATUS_OFF);
+                setFingerDown(false); // Ensure touch driver knows we are done
             }
         }
 
@@ -197,7 +201,11 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void cancel() {
         LOG(INFO) << __func__;
         enrolling.store(false);
+        
+        // Forcefully kill HBM and reset touch states on fallback
+        killHbm();
         setFodStatus(FOD_STATUS_OFF);
+        setFingerDown(false);
     }
 
     void preEnroll() {
@@ -213,7 +221,11 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void postEnroll() {
         LOG(INFO) << __func__;
         enrolling.store(false);
+        
+        // Force cleanup to prevent HBM lockups after enrollment
+        killHbm();
         setFodStatus(FOD_STATUS_OFF);
+        setFingerDown(false);
     }
 
   private:
@@ -235,6 +247,17 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::thread fodThread_;
     std::thread dispThread_;
     std::thread screenThread_;
+
+    void killHbm() {
+        int fd = open("/proc/mi_display/tx_cmd_set_prim", O_WRONLY);
+        if (fd >= 0) {
+            write(fd, "71\n", 3);
+            close(fd);
+            LOG(INFO) << "💡 HBM killed via proc node";
+        } else {
+            LOG(ERROR) << "❌ Failed to open HBM_CTRL_NODE";
+        }
+    }
 
     int getBrightness() {
         int fd = open(BRIGHTNESS_PATH, O_RDONLY);
