@@ -157,6 +157,9 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             return;
         }
 
+        // Failsafe for short taps or between enrollment taps
+        killHbm();
+        
         setFingerDown(false);
     }
 
@@ -164,7 +167,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << __func__ << " result: " << result << " vendorCode: " << vendorCode;
         
         if (static_cast<AcquiredInfo>(result) == AcquiredInfo::GOOD) {
-            // Disable HBM on successful acquisition
+            // Standard hardware-deferred HBM turn off (waits for physical finger up naturally)
             {
                 std::lock_guard<std::mutex> lock(disp_mutex_);
                 if (disp_fd_.get() >= 0) {
@@ -176,10 +179,10 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 }
             }
             
-            // Hard kill HBM as a fallback
-            killHbm();
-            
+            // Only apply the aggressive daemon-style kill if we are NOT enrolling.
+            // Fixes the single-tap/priming bug on the lockscreen without flickering enrollment.
             if (!enrolling.load()) {
+                killHbm();
                 setFodStatus(FOD_STATUS_OFF);
                 setFingerDown(false); // Ensure touch driver knows we are done
             }
@@ -202,7 +205,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << __func__;
         enrolling.store(false);
         
-        // Forcefully kill HBM and reset touch states on fallback
+        // Forcefully kill HBM and reset touch states on fallback (fixes PIN UI bug)
         killHbm();
         setFodStatus(FOD_STATUS_OFF);
         setFingerDown(false);
@@ -222,7 +225,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << __func__;
         enrolling.store(false);
         
-        // Force cleanup to prevent HBM lockups after enrollment
+        // Force cleanup to prevent HBM lockups after the final enrollment tap
         killHbm();
         setFodStatus(FOD_STATUS_OFF);
         setFingerDown(false);
