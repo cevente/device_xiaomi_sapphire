@@ -84,7 +84,7 @@ AUDIO_HAL_DIR := hardware/qcom-caf/sm6225/audio/primary-hal
 
 PRODUCT_PACKAGES += \
     audioadsprpcd \
-    libsndcardparser
+    
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/configs/audio/audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_configuration.xml \
@@ -302,7 +302,6 @@ PRODUCT_PACKAGES += \
 PRODUCT_PACKAGES += \
     ipacm \
     IPACM_cfg.xml \
-    IPACM_Filter_cfg.xml
 
 # IR
 PRODUCT_PACKAGES += \
