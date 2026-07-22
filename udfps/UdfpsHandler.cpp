@@ -89,7 +89,7 @@ static disp_event_resp* parseDispEvent(int fd) {
 
 class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
   public:
-    XiaomiSm6225UdfpsHandler() : mDevice(nullptr), isFpcFod(false), mCachedScreenState(-1) {
+    XiaomiSm6225UdfpsHandler() : mDevice(nullptr), isFpcFod(false), mCachedScreenState(-1), mHbmState(false) {
         mLastScreenStateCheck = std::chrono::steady_clock::now();
     }
 
@@ -134,7 +134,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             std::chrono::steady_clock::now().time_since_epoch()).count());
 
         // On fpc_fod devices, enable FOD status when finger down is detected
-        // since the waiting message is not reliably sent.
         if (isFpcFod) {
             setFodStatus(FOD_STATUS_ON);
         }
@@ -154,8 +153,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             return;
         }
 
-        // Clean up HBM and touch state on finger up
-        // This handles the case where authentication fails or finger is lifted without success
         cleanupFodState();
     }
 
@@ -164,16 +161,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         
         if (static_cast<AcquiredInfo>(result) == AcquiredInfo::GOOD) {
             // Successful authentication - turn off HBM
-            {
-                std::lock_guard<std::mutex> lock(disp_mutex_);
-                if (disp_fd_.get() >= 0) {
-                    disp_local_hbm_req req;
-                    req.base.flag = 0;
-                    req.base.disp_id = MI_DISP_PRIMARY;
-                    req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-                    ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req);
-                }
-            }
+            setHbmOff();
             
             if (!enrolling.load()) {
                 setFodStatus(FOD_STATUS_OFF);
@@ -235,6 +223,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::mutex touch_mutex_;
     std::mutex disp_mutex_;
     std::mutex device_mutex_;
+    std::mutex hbm_mutex_;
+    bool mHbmState;
 
     std::thread fodThread_;
     std::thread dispThread_;
@@ -247,7 +237,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - mLastScreenStateCheck).count();
         
-        // Cache for 100ms to avoid excessive file reads
         if (elapsed < 100 && mCachedScreenState != -1) {
             return mCachedScreenState;
         }
@@ -270,20 +259,57 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         return mCachedScreenState;
     }
 
+    void setHbmOn() {
+        std::lock_guard<std::mutex> lock(hbm_mutex_);
+        
+        if (mHbmState) {
+            LOG(DEBUG) << "HBM already on, skipping";
+            return;
+        }
+        
+        std::lock_guard<std::mutex> dispLock(disp_mutex_);
+        if (disp_fd_.get() >= 0) {
+            disp_local_hbm_req req;
+            req.base.flag = 0;
+            req.base.disp_id = MI_DISP_PRIMARY;
+            req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_WHITE_1000NIT;
+            if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) == 0) {
+                mHbmState = true;
+                LOG(INFO) << "💡 HBM turned ON";
+            } else {
+                LOG(ERROR) << "Failed to set HBM ON: " << strerror(errno);
+            }
+        }
+    }
+
+    void setHbmOff() {
+        std::lock_guard<std::mutex> lock(hbm_mutex_);
+        
+        if (!mHbmState) {
+            LOG(DEBUG) << "HBM already off, skipping";
+            return;
+        }
+        
+        std::lock_guard<std::mutex> dispLock(disp_mutex_);
+        if (disp_fd_.get() >= 0) {
+            disp_local_hbm_req req;
+            req.base.flag = 0;
+            req.base.disp_id = MI_DISP_PRIMARY;
+            req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
+            if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) == 0) {
+                mHbmState = false;
+                LOG(INFO) << "💡 HBM turned OFF";
+            } else {
+                LOG(ERROR) << "Failed to set HBM OFF: " << strerror(errno);
+            }
+        }
+    }
+
     void cleanupFodState() {
         LOG(INFO) << "Cleaning up FOD state";
         
         // Turn off HBM
-        {
-            std::lock_guard<std::mutex> lock(disp_mutex_);
-            if (disp_fd_.get() >= 0) {
-                disp_local_hbm_req req;
-                req.base.flag = 0;
-                req.base.disp_id = MI_DISP_PRIMARY;
-                req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-                ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req);
-            }
-        }
+        setHbmOff();
         
         // Turn off FOD status
         setFodStatus(FOD_STATUS_OFF);
@@ -303,7 +329,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     if (currentState == 0 && isFpcFod && isScreenOffEnabled) {
                         setFodStatus(FOD_STATUS_ON);
                     } else if (currentState == 1 && isFpcFod) {
-                        // Screen turned ON - clean up any lingering FOD state
                         cleanupFodState();
                     }
                     lastState = currentState;
@@ -336,7 +361,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             return;
         }
 
-        // Initial dummy read to clear state
         readBool(fd);
 
         struct pollfd fodPressStatusPoll = {
@@ -367,12 +391,10 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
             fodPressStatusPoll.revents = 0;
 
-            // Only process hardware FOD events when FOD is active
-            // This prevents the PIN entry bug because FOD status will be OFF when on PIN entry
             int currentFodStatus = getFodStatus();
             if (currentFodStatus != FOD_STATUS_ON) {
                 LOG(DEBUG) << "UDFPS: Ignoring hardware FOD event because FOD status is OFF";
-                readBool(fd); // Clear the state
+                readBool(fd);
                 continue;
             }
 
@@ -380,9 +402,10 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()).count();
             
-            // Filter hardware false UP events
             if (pressed) {
                 mFbDownTimeMs.store(now);
+                // Turn on HBM when finger is pressed
+                setHbmOn();
             } else {
                 uint64_t elapsed = now - mFbDownTimeMs.load();
                 if (elapsed < 250) {
@@ -394,14 +417,11 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     }
                 }
                 
-                // Hardware finger up detected - clean up FOD state
-                // This ensures HBM is turned off even if authentication fails
                 LOG(INFO) << "UDFPS: Hardware finger up detected, cleaning up";
                 cleanupFodState();
                 continue;
             }
 
-            // Security: Only send touch if Screen-Off is enabled or screen is on
             bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
             if (!isScreenOffEnabled && getScreenState() == 0) {
                 LOG(INFO) << "UDFPS: Touch ignored. Screen-Off disabled.";
@@ -442,7 +462,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             return;
         }
 
-        // Register for FOD events
         disp_event_req req;
         req.base.flag = 0;
         req.base.disp_id = MI_DISP_PRIMARY;
@@ -531,21 +550,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, pressed ? 1 : 0};
                 if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
                     LOG(ERROR) << "Failed to set finger down: " << strerror(errno);
-                }
-            }
-        }
-
-        // Update display HBM
-        {
-            std::lock_guard<std::mutex> lock(disp_mutex_);
-            if (disp_fd_.get() >= 0) {
-                disp_local_hbm_req req;
-                req.base.flag = 0;
-                req.base.disp_id = MI_DISP_PRIMARY;
-                req.local_hbm_value = pressed ? LHBM_TARGET_BRIGHTNESS_WHITE_1000NIT
-                                              : LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-                if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
-                    LOG(ERROR) << "Failed to set HBM: " << strerror(errno);
                 }
             }
         }
