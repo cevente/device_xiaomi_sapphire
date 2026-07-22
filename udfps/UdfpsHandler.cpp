@@ -159,8 +159,13 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
         // Failsafe for short taps or between enrollment taps
         killHbm();
-        
         setFingerDown(false);
+
+        // Forcefully shut down the FOD touch sensing on finger up when outside of enrollment.
+        // This mimics the daemon's reset, preventing the FOD from activating randomly in the PIN entry.
+        if (!enrolling.load()) {
+            setFodStatus(FOD_STATUS_OFF);
+        }
     }
 
     void onAcquired(int32_t result, int32_t vendorCode) {
@@ -225,10 +230,20 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << __func__;
         enrolling.store(false);
         
-        // Force cleanup to prevent HBM lockups after the final enrollment tap
+        // Initial force cleanup to prevent HBM lockups
         killHbm();
         setFodStatus(FOD_STATUS_OFF);
         setFingerDown(false);
+
+        // Handle the race condition where the finger is held too long on the last step.
+        // We spin off a detached thread to wait 50ms and assert the OFF states again,
+        // ensuring the display node (/proc/mi_display/tx_cmd_set_prim) doesn't get stuck.
+        std::thread([this]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            killHbm();
+            setFodStatus(FOD_STATUS_OFF);
+            LOG(INFO) << "💡 Delayed HBM kill executed after enrollment finish";
+        }).detach();
     }
 
   private:
