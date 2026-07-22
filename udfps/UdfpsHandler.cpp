@@ -206,8 +206,21 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void cancel() {
         LOG(INFO) << __func__;
         enrolling.store(false);
-        setFingerDown(false); // Force state reset on cancel
-        setFodStatus(FOD_STATUS_OFF);
+        
+        int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
+        bool pressed = false;
+        if (fd >= 0) {
+            pressed = readBool(fd);
+            close(fd);
+        }
+
+        setFingerDown(false); // Force HBM state reset on cancel
+        
+        if (pressed) {
+            LOG(INFO) << "UDFPS: Finger still down during cancel. Deferring FOD_STATUS_OFF.";
+        } else {
+            setFodStatus(FOD_STATUS_OFF);
+        }
     }
 
     void preEnroll() {
@@ -223,8 +236,21 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void postEnroll() {
         LOG(INFO) << __func__;
         enrolling.store(false);
-        setFingerDown(false); // Fixes HBM lockup if held too long
-        setFodStatus(FOD_STATUS_OFF);
+        
+        int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
+        bool pressed = false;
+        if (fd >= 0) {
+            pressed = readBool(fd);
+            close(fd);
+        }
+
+        setFingerDown(false); // Kill HBM light
+        
+        if (pressed) {
+            LOG(INFO) << "UDFPS: Finger still down during postEnroll. Deferring FOD_STATUS_OFF.";
+        } else {
+            setFodStatus(FOD_STATUS_OFF);
+        }
     }
 
   private:
