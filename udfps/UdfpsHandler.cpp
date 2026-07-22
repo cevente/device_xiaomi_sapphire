@@ -129,7 +129,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void onFingerDown(uint32_t /*x*/, uint32_t /*y*/, float /*minor*/, float /*major*/) {
-        LOG(INFO) __func__;
+        LOG(INFO) << __func__;
         
         mFbDownTimeMs.store(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -219,7 +219,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     android::base::unique_fd disp_fd_;
     std::atomic<bool> enrolling{false};
     std::atomic<bool> isRunning{true};
-    std::atomic<bool> mPendingCleanup{false}; // Tracks deferred cleanup states
+    std::atomic<bool> mPendingCleanup{false};
     bool isFpcFod;
     
     std::atomic<uint64_t> mFbDownTimeMs{0};
@@ -243,7 +243,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         setFingerDown(false);
         
         if (pressed) {
-            mPendingCleanup = true; // Flag it so the monitor catches the upcoming release
+            mPendingCleanup = true;
             LOG(INFO) << "UDFPS: Finger held during enrollment finish. Cleanup deferred until lift.";
         } else {
             mPendingCleanup = false;
@@ -365,7 +365,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             LOG(DEBUG) << "fod_press_status changed: " << (pressed ? "pressed" : "released");
             setFingerDown(pressed);
             
-            // If the finger lifted, resolve any pending cleanup from enrollment finish
             if (!pressed) {
                 if (mPendingCleanup || !enrolling.load()) {
                     setFodStatus(FOD_STATUS_OFF);
