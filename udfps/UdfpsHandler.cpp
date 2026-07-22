@@ -320,10 +320,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         while (isRunning.load()) {
             int currentState = getScreenState();
             if (currentState != -1) {
-                bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
-
                 if (currentState != lastState) {
-                    if (currentState == 0 && isFpcFod && isScreenOffEnabled) {
+                    if (currentState == 0 && isFpcFod) {
                         setFodStatus(FOD_STATUS_ON);
                     } else if (currentState == 1 && isFpcFod) {
                         if (!enrolling.load() && !mPendingCleanup) {
@@ -336,6 +334,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     }
+
 
     void shutdownThreads() {
         isRunning.store(false);
