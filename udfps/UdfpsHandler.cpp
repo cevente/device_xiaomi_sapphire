@@ -153,8 +153,22 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         uint64_t elapsed = now - mFbDownTimeMs.load();
         
         if (elapsed < 250) {
-            LOG(INFO) << "UDFPS: Ignorando falso UP del framework (pasaron " << elapsed << "ms)";
-            return;
+            // Verify with the actual hardware touch node before ignoring
+            int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
+            if (fd >= 0) {
+                bool physicallyPressed = readBool(fd);
+                close(fd);
+                
+                if (physicallyPressed) {
+                    LOG(INFO) << "UDFPS: Framework reported short tap (" << elapsed << "ms) but physical finger is still present. Ignoring false UP.";
+                    return;
+                }
+                LOG(INFO) << "UDFPS: Genuine short tap detected. Proceeding with cleanup.";
+            } else {
+                // Fallback if node fails to open
+                LOG(ERROR) << "UDFPS: Couldn't verify hardware state. Assuming false UP.";
+                return;
+            }
         }
 
         setFingerDown(false);
