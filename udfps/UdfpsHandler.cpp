@@ -206,21 +206,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void cancel() {
         LOG(INFO) << __func__;
         enrolling.store(false);
-        
-        int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
-        bool pressed = false;
-        if (fd >= 0) {
-            pressed = readBool(fd);
-            close(fd);
-        }
-
-        setFingerDown(false); // Force HBM state reset on cancel
-        
-        if (pressed) {
-            LOG(INFO) << "UDFPS: Finger still down during cancel. Deferring FOD_STATUS_OFF.";
-        } else {
-            setFodStatus(FOD_STATUS_OFF);
-        }
+        forceCleanupIfPressed();
     }
 
     void preEnroll() {
@@ -236,21 +222,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void postEnroll() {
         LOG(INFO) << __func__;
         enrolling.store(false);
-        
-        int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
-        bool pressed = false;
-        if (fd >= 0) {
-            pressed = readBool(fd);
-            close(fd);
-        }
-
-        setFingerDown(false); // Kill HBM light
-        
-        if (pressed) {
-            LOG(INFO) << "UDFPS: Finger still down during postEnroll. Deferring FOD_STATUS_OFF.";
-        } else {
-            setFodStatus(FOD_STATUS_OFF);
-        }
+        forceCleanupIfPressed();
     }
 
   private:
@@ -272,6 +244,23 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::thread fodThread_;
     std::thread dispThread_;
     std::thread screenThread_;
+
+    void forceCleanupIfPressed() {
+        int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
+        bool pressed = false;
+        if (fd >= 0) {
+            pressed = readBool(fd);
+            close(fd);
+        }
+
+        setFingerDown(false);
+        
+        if (pressed) {
+            LOG(INFO) << "UDFPS: Finger still physically present on enrollment finish. Deferring FOD_STATUS_OFF.";
+        } else {
+            setFodStatus(FOD_STATUS_OFF);
+        }
+    }
 
     int getBrightness() {
         int fd = open(BRIGHTNESS_PATH, O_RDONLY);
@@ -396,7 +385,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             LOG(DEBUG) << "fod_press_status changed: " << (pressed ? "pressed" : "released");
             setFingerDown(pressed);
             
-            // Safety net for fast single-taps that bypass the framework's 'onFingerUp' filter.
+            // Safety net for fast single-taps or deferred postEnroll cleanups.
             // If the hardware explicitly says the finger is gone, forcefully shut down the panel zone.
             if (!pressed && !enrolling.load()) {
                 setFodStatus(FOD_STATUS_OFF);
