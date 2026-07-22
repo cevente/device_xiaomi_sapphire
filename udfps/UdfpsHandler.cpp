@@ -131,9 +131,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void onFingerDown(uint32_t /*x*/, uint32_t /*y*/, float /*minor*/, float /*major*/) {
         LOG(INFO) << __func__;
         
-        // Clear HBM stuck flag on new touch
         mHbmStuck = false;
-        
         mFbDownTimeMs.store(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
 
@@ -159,6 +157,21 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << __func__ << " result: " << result << " vendorCode: " << vendorCode;
         
         if (static_cast<AcquiredInfo>(result) == AcquiredInfo::GOOD) {
+            
+            // HyperOS Native Behavior: Instantly kill HBM on result if property allows, ignoring touch release delay
+            bool lhbmoffafterresult = android::base::GetBoolProperty("persist.vendor.sys.fp.fod.lhbmoffafterresult", true);
+            if (lhbmoffafterresult) {
+                LOG(INFO) << "💡 HyperOS behavior: Aggressively turning off Local HBM after acquired result";
+                std::lock_guard<std::mutex> lock(disp_mutex_);
+                if (disp_fd_.get() >= 0) {
+                    disp_local_hbm_req req;
+                    req.base.flag = 1; // HyperOS explicitly uses flag=1 for this IOCTL
+                    req.base.disp_id = MI_DISP_PRIMARY;
+                    req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
+                    ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req);
+                }
+            }
+
             setFingerDown(false);
             mPendingCleanup = false;
             mHbmStuck = false;
@@ -174,7 +187,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             setFodStatus(FOD_STATUS_ON);
         }
         
-        // Detect if HBM is being killed while finger is still down
         if (vendorCode == 23 && mIsFingerDown) {
             LOG(INFO) << "⚠️ HBM killed while finger is still down - potential stuck state detected";
             mHbmStuck = true;
@@ -247,11 +259,10 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void forceHbmCleanup() {
         LOG(INFO) << "Forcing HBM cleanup";
         
-        // Force HBM off via display ioctl
         std::lock_guard<std::mutex> lock(disp_mutex_);
         if (disp_fd_.get() >= 0) {
             disp_local_hbm_req req;
-            req.base.flag = 0;
+            req.base.flag = 1; // HyperOS explicitly uses flag=1 for this IOCTL
             req.base.disp_id = MI_DISP_PRIMARY;
             req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
             if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
@@ -259,7 +270,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             }
         }
         
-        // Reset touch state
         std::lock_guard<std::mutex> touchLock(touch_mutex_);
         if (touch_fd_.get() >= 0) {
             int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 0};
@@ -436,7 +446,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
 
         disp_event_req req;
-        req.base.flag = 0;
+        req.base.flag = 0; // For registration, HyperOS explicitly uses flag=0
         req.base.disp_id = MI_DISP_PRIMARY;
         req.type = MI_DISP_EVENT_FOD;
         if (ioctl(fd, MI_DISP_IOCTL_REGISTER_EVENT, &req) < 0) {
@@ -530,7 +540,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             std::lock_guard<std::mutex> lock(disp_mutex_);
             if (disp_fd_.get() >= 0) {
                 disp_local_hbm_req req;
-                req.base.flag = 0;
+                req.base.flag = 1; // HyperOS explicitly uses flag=1 for this IOCTL
                 req.base.disp_id = MI_DISP_PRIMARY;
                 req.local_hbm_value = pressed ? LHBM_TARGET_BRIGHTNESS_WHITE_1000NIT
                                               : LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
