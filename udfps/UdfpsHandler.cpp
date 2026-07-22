@@ -89,7 +89,7 @@ static disp_event_resp* parseDispEvent(int fd) {
 
 class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
   public:
-    XiaomiSm6225UdfpsHandler() : mDevice(nullptr), isFpcFod(false), mCachedScreenState(-1), mHbmState(false) {
+    XiaomiSm6225UdfpsHandler() : mDevice(nullptr), isFpcFod(false), mCachedScreenState(-1) {
         mLastScreenStateCheck = std::chrono::steady_clock::now();
     }
 
@@ -133,12 +133,14 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mFbDownTimeMs.store(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
 
-        // On fpc_fod devices, enable FOD status when finger down is detected
         if (isFpcFod) {
             setFodStatus(FOD_STATUS_ON);
         }
 
         setFingerDown(true);
+        
+        // Enable HBM via extCmd when finger is down
+        setHbmOn();
     }
 
     void onFingerUp() {
@@ -223,8 +225,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::mutex touch_mutex_;
     std::mutex disp_mutex_;
     std::mutex device_mutex_;
-    std::mutex hbm_mutex_;
-    bool mHbmState;
 
     std::thread fodThread_;
     std::thread dispThread_;
@@ -260,48 +260,20 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void setHbmOn() {
-        std::lock_guard<std::mutex> lock(hbm_mutex_);
-        
-        if (mHbmState) {
-            LOG(DEBUG) << "HBM already on, skipping";
-            return;
-        }
-        
-        std::lock_guard<std::mutex> dispLock(disp_mutex_);
-        if (disp_fd_.get() >= 0) {
-            disp_local_hbm_req req;
-            req.base.flag = 0;
-            req.base.disp_id = MI_DISP_PRIMARY;
-            req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_WHITE_1000NIT;
-            if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) == 0) {
-                mHbmState = true;
-                LOG(INFO) << "💡 HBM turned ON";
-            } else {
-                LOG(ERROR) << "Failed to set HBM ON: " << strerror(errno);
-            }
+        // Use extCmd to enable local HBM
+        std::lock_guard<std::mutex> lock(device_mutex_);
+        if (mDevice != nullptr) {
+            mDevice->extCmd(mDevice, COMMAND_NIT, PARAM_NIT_FOD);
+            LOG(INFO) << "💡 HBM enabled via extCmd";
         }
     }
 
     void setHbmOff() {
-        std::lock_guard<std::mutex> lock(hbm_mutex_);
-        
-        if (!mHbmState) {
-            LOG(DEBUG) << "HBM already off, skipping";
-            return;
-        }
-        
-        std::lock_guard<std::mutex> dispLock(disp_mutex_);
-        if (disp_fd_.get() >= 0) {
-            disp_local_hbm_req req;
-            req.base.flag = 0;
-            req.base.disp_id = MI_DISP_PRIMARY;
-            req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-            if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) == 0) {
-                mHbmState = false;
-                LOG(INFO) << "💡 HBM turned OFF";
-            } else {
-                LOG(ERROR) << "Failed to set HBM OFF: " << strerror(errno);
-            }
+        // Use extCmd to disable local HBM
+        std::lock_guard<std::mutex> lock(device_mutex_);
+        if (mDevice != nullptr) {
+            mDevice->extCmd(mDevice, COMMAND_NIT, PARAM_NIT_NONE);
+            LOG(INFO) << "💡 HBM disabled via extCmd";
         }
     }
 
@@ -404,7 +376,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             
             if (pressed) {
                 mFbDownTimeMs.store(now);
-                // Turn on HBM when finger is pressed
+                // HBM is enabled via onFingerDown callback, but ensure it's on
                 setHbmOn();
             } else {
                 uint64_t elapsed = now - mFbDownTimeMs.load();
@@ -515,10 +487,10 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
             bool localHbmUiReady = value & LOCAL_HBM_UI_READY;
             
-            std::lock_guard<std::mutex> deviceLock(device_mutex_);
-            if (mDevice != nullptr) {
-                mDevice->extCmd(mDevice, COMMAND_NIT,
-                              localHbmUiReady ? PARAM_NIT_FOD : PARAM_NIT_NONE);
+            // When UI is ready for local HBM, we might need to trigger it
+            if (localHbmUiReady) {
+                LOG(DEBUG) << "Local HBM UI ready event received";
+                // The extCmd in onFingerDown should handle this
             }
         }
 
