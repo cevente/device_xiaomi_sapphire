@@ -250,6 +250,14 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void setHbmOn() {
+        // 1. Direct hardware command
+        int proc_fd = open("/proc/mi_display/tx_cmd_set_prim", O_WRONLY);
+        if (proc_fd >= 0) {
+            write(proc_fd, "54\n", 3);
+            close(proc_fd);
+        }
+
+        // 2. Kernel IOCTL (Required to trigger the LOCAL_HBM_UI_READY event)
         {
             std::lock_guard<std::mutex> lock(disp_mutex_);
             if (disp_fd_.get() >= 0) {
@@ -264,14 +272,17 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 }
             }
         }
-
-        std::lock_guard<std::mutex> lock(device_mutex_);
-        if (mDevice != nullptr) {
-            mDevice->extCmd(mDevice, COMMAND_NIT, PARAM_NIT_FOD);
-        }
     }
 
     void setHbmOff() {
+        // 1. Direct hardware command
+        int proc_fd = open("/proc/mi_display/tx_cmd_set_prim", O_WRONLY);
+        if (proc_fd >= 0) {
+            write(proc_fd, "71\n", 3);
+            close(proc_fd);
+        }
+
+        // 2. Kernel IOCTL
         {
             std::lock_guard<std::mutex> lock(disp_mutex_);
             if (disp_fd_.get() >= 0) {
@@ -496,8 +507,15 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
             bool localHbmUiReady = value & LOCAL_HBM_UI_READY;
             
+            // Let the kernel dictate when the HAL should look for a fingerprint
+            std::lock_guard<std::mutex> deviceLock(device_mutex_);
+            if (mDevice != nullptr) {
+                mDevice->extCmd(mDevice, COMMAND_NIT,
+                              localHbmUiReady ? PARAM_NIT_FOD : PARAM_NIT_NONE);
+            }
+            
             if (localHbmUiReady) {
-                LOG(DEBUG) << "Local HBM UI ready event received";
+                LOG(DEBUG) << "Local HBM UI ready event received - HAL notified";
             }
         }
 
