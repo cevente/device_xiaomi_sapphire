@@ -15,7 +15,6 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <cstdlib>
 
 #include <atomic>
 #include <cerrno>
@@ -282,7 +281,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void killHbm() {
-        // Use ID 71: mi,mdss-dsi-local-hbm-off-to-hbm-command
         int fd = open(HBM_CTRL_NODE, O_WRONLY);
         if (fd >= 0) {
             write(fd, "71\n", 3);
@@ -367,14 +365,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             }
 
             fodPressStatusPoll.revents = 0;
-
-            // Restrict fod_press_status to Screen OFF only
-            if (getScreenState() == 1) {
-                LOG(DEBUG) << "UDFPS: Ignoring fod_press_status event because screen is ON.";
-                // Need to clear the buffer so poll doesn't instantly refire
-                readBool(fd); 
-                continue;
-            }
 
             const bool pressed = readBool(fd);
             uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -501,8 +491,20 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void setFingerDown(bool pressed) {
         bool isScreenOn = (getScreenState() == 1);
 
+        // Always update touch controller and fingerprint HAL regardless of screen state
+        {
+            std::lock_guard<std::mutex> lock(touch_mutex_);
+            if (touch_fd_.get() >= 0) {
+                int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, pressed ? 1 : 0};
+                if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
+                    LOG(ERROR) << "Failed to set finger down: " << strerror(errno);
+                }
+            }
+        }
+
+        // Handle HBM based on screen state
         if (isScreenOn) {
-            // SCREEN ON HANDLING (Using local HBM command IDs via /proc)
+            // SCREEN ON: Use /proc node for local HBM
             int fd = open(HBM_CTRL_NODE, O_WRONLY);
             if (fd >= 0) {
                 if (pressed) {
@@ -518,46 +520,27 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             } else {
                 LOG(ERROR) << "❌ Failed to open HBM_CTRL_NODE";
             }
+        } else {
+            // SCREEN OFF: Use display framework IOCTL
+            std::lock_guard<std::mutex> lock(disp_mutex_);
+            if (disp_fd_.get() >= 0) {
+                disp_local_hbm_req req;
+                req.base.flag = 0;
+                req.base.disp_id = MI_DISP_PRIMARY;
+                req.local_hbm_value = pressed ? LHBM_TARGET_BRIGHTNESS_WHITE_1000NIT
+                                              : LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
+                if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
+                    LOG(ERROR) << "Failed to set HBM: " << strerror(errno);
+                }
+            }
+        }
 
-            // Send FOD press status to fingerprint HAL
+        // Always notify fingerprint device
+        {
             std::lock_guard<std::mutex> lock(device_mutex_);
             if (mDevice != nullptr) {
                 mDevice->extCmd(mDevice, COMMAND_FOD_PRESS_STATUS,
                               pressed ? PARAM_FOD_PRESSED : PARAM_FOD_RELEASED);
-            }
-
-        } else {
-            // SCREEN OFF HANDLING (Using touch IOCTL and display framework calls)
-            {
-                std::lock_guard<std::mutex> lock(touch_mutex_);
-                if (touch_fd_.get() >= 0) {
-                    int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, pressed ? 1 : 0};
-                    if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
-                        LOG(ERROR) << "Failed to set finger down: " << strerror(errno);
-                    }
-                }
-            }
-
-            {
-                std::lock_guard<std::mutex> lock(disp_mutex_);
-                if (disp_fd_.get() >= 0) {
-                    disp_local_hbm_req req;
-                    req.base.flag = 0;
-                    req.base.disp_id = MI_DISP_PRIMARY;
-                    req.local_hbm_value = pressed ? LHBM_TARGET_BRIGHTNESS_WHITE_1000NIT
-                                                  : LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-                    if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
-                        LOG(ERROR) << "Failed to set HBM: " << strerror(errno);
-                    }
-                }
-            }
-
-            {
-                std::lock_guard<std::mutex> lock(device_mutex_);
-                if (mDevice != nullptr) {
-                    mDevice->extCmd(mDevice, COMMAND_FOD_PRESS_STATUS,
-                                  pressed ? PARAM_FOD_PRESSED : PARAM_FOD_RELEASED);
-                }
             }
         }
     }
