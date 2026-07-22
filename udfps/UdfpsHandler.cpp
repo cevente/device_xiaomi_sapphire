@@ -146,26 +146,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
     void onFingerUp() {
         LOG(INFO) << __func__;
-        
-        uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count();
-        uint64_t elapsed = now - mFbDownTimeMs.load();
-        
-        if (elapsed < 250) {
-            int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
-            if (fd >= 0) {
-                bool physicallyPressed = readBool(fd);
-                close(fd);
-                
-                if (physicallyPressed) {
-                    LOG(INFO) << "UDFPS: Short tap detected, but finger is still present. Ignoring false UP.";
-                    return;
-                }
-            } else {
-                return;
-            }
-        }
-
         setFingerDown(false);
         mPendingCleanup = false;
         mHbmStuck = false;
@@ -432,25 +412,10 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             fodPressStatusPoll.revents = 0;
 
             const bool pressed = readBool(fd);
-            uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count();
             
-            if (pressed) {
-                mFbDownTimeMs.store(now);
-                mIsFingerDown = true;
-            } else {
-                uint64_t elapsed = now - mFbDownTimeMs.load();
-                if (elapsed < 250) {
-                    LOG(INFO) << "UDFPS: Hardware marco UP muy rapido (" << elapsed << "ms). Esperando 100ms...";
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                    if (readBool(fd)) {
-                        LOG(INFO) << "UDFPS: El dedo seguia ahi! Falso UP fisico ignorado.";
-                        continue; 
-                    }
-                }
-                mIsFingerDown = false;
-            }
-
+            // Update finger state
+            mIsFingerDown = pressed;
+            
             bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
             if (!isScreenOffEnabled && getBrightness() == 0) {
                 LOG(INFO) << "UDFPS: Toque ignorado. Screen-Off desactivado.";
