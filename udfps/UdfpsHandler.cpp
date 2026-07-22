@@ -157,21 +157,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << __func__ << " result: " << result << " vendorCode: " << vendorCode;
         
         if (static_cast<AcquiredInfo>(result) == AcquiredInfo::GOOD) {
-            
-            // HyperOS Native Behavior: Instantly kill HBM on result if property allows, ignoring touch release delay
-            bool lhbmoffafterresult = android::base::GetBoolProperty("persist.vendor.sys.fp.fod.lhbmoffafterresult", true);
-            if (lhbmoffafterresult) {
-                LOG(INFO) << "💡 HyperOS behavior: Aggressively turning off Local HBM after acquired result";
-                std::lock_guard<std::mutex> lock(disp_mutex_);
-                if (disp_fd_.get() >= 0) {
-                    disp_local_hbm_req req;
-                    req.base.flag = 1; // HyperOS explicitly uses flag=1 for this IOCTL
-                    req.base.disp_id = MI_DISP_PRIMARY;
-                    req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-                    ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req);
-                }
-            }
-
             setFingerDown(false);
             mPendingCleanup = false;
             mHbmStuck = false;
@@ -262,7 +247,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         std::lock_guard<std::mutex> lock(disp_mutex_);
         if (disp_fd_.get() >= 0) {
             disp_local_hbm_req req;
-            req.base.flag = 1; // HyperOS explicitly uses flag=1 for this IOCTL
+            req.base.flag = 1; 
             req.base.disp_id = MI_DISP_PRIMARY;
             req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
             if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
@@ -410,12 +395,35 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             fodPressStatusPoll.revents = 0;
 
             const bool pressed = readBool(fd);
+            uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            
+            // 1. HARDWARE FALSE-UP FILTER (Restored for single taps)
+            if (pressed) {
+                mFbDownTimeMs.store(now);
+            } else {
+                uint64_t elapsed = now - mFbDownTimeMs.load();
+                if (elapsed < 250) {
+                    LOG(INFO) << "UDFPS: Hardware reported fast UP (" << elapsed << "ms). Verifying...";
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    if (readBool(fd)) {
+                        LOG(INFO) << "UDFPS: Finger still present! Ignoring false physical UP.";
+                        continue; 
+                    }
+                }
+            }
+
             mIsFingerDown = pressed;
             
             bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
             if (!isScreenOffEnabled && getBrightness() == 0) {
-                LOG(INFO) << "UDFPS: Toque ignorado. Screen-Off desactivado.";
                 continue;
+            }
+
+            // 2. THE RACE CONDITION FIX: Do not allow rogue DOWN interrupts to reactivate HBM post-enrollment
+            if (mPendingCleanup && pressed) {
+                LOG(INFO) << "UDFPS: Cleanup pending. Ignoring rogue hardware DOWN event to prevent HBM stuck state.";
+                continue; 
             }
 
             LOG(DEBUG) << "fod_press_status changed: " << (pressed ? "pressed" : "released");
@@ -446,7 +454,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
 
         disp_event_req req;
-        req.base.flag = 0; // For registration, HyperOS explicitly uses flag=0
+        req.base.flag = 0; 
         req.base.disp_id = MI_DISP_PRIMARY;
         req.type = MI_DISP_EVENT_FOD;
         if (ioctl(fd, MI_DISP_IOCTL_REGISTER_EVENT, &req) < 0) {
@@ -540,7 +548,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             std::lock_guard<std::mutex> lock(disp_mutex_);
             if (disp_fd_.get() >= 0) {
                 disp_local_hbm_req req;
-                req.base.flag = 1; // HyperOS explicitly uses flag=1 for this IOCTL
+                req.base.flag = 1; 
                 req.base.disp_id = MI_DISP_PRIMARY;
                 req.local_hbm_value = pressed ? LHBM_TARGET_BRIGHTNESS_WHITE_1000NIT
                                               : LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
