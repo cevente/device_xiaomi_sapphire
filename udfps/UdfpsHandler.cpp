@@ -185,6 +185,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void cancel() {
         LOG(INFO) << __func__;
         enrolling.store(false);
+        // Set property to stop enrollment monitor
+        android::base::SetProperty("persist.sys.fod.enroll", "0");
         forceCleanupIfPressed();
     }
 
@@ -193,6 +195,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mPendingCleanup = false;
         mHbmStuck = false;
         enrolling.store(true);
+        // Set property to start enrollment monitor
+        android::base::SetProperty("persist.sys.fod.enroll", "1");
     }
 
     void enroll() {
@@ -203,15 +207,9 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void postEnroll() {
         LOG(INFO) << __func__;
         enrolling.store(false);
-        
-        // If finger is still down (common on last enrollment step),
-        // force immediate cleanup to prevent HBM getting stuck
-        if (mIsFingerDown) {
-            LOG(INFO) << "⚠️ Enrollment finished with finger still down - forcing HBM cleanup";
-            forceHbmCleanup();
-        } else {
-            forceCleanupIfPressed();
-        }
+        // Set property to stop enrollment monitor
+        android::base::SetProperty("persist.sys.fod.enroll", "0");
+        forceCleanupIfPressed();
     }
 
   private:
