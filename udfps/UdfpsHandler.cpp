@@ -90,8 +90,7 @@ static disp_event_resp* parseDispEvent(int fd) {
 class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
   public:
     XiaomiSm6225UdfpsHandler() : mDevice(nullptr), isFpcFod(false), mPendingCleanup(false), 
-                                  mHbmStuck(false), mAuthInProgress(false), mIsScreenOnFod(false),
-                                  mEnrollmentSuccess(false) {}
+                                  mHbmStuck(false), mAuthInProgress(false), mIsScreenOnFod(false) {}
 
     ~XiaomiSm6225UdfpsHandler() {
         LOG(INFO) << "Destructor called, shutting down threads";
@@ -131,12 +130,11 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void onFingerDown(uint32_t /*x*/, uint32_t /*y*/, float /*minor*/, float /*major*/) {
-        LOG(INFO) << __func__;
+        LOG(INFO) << __func__ << " - Framework pointer DOWN";
         
         // Clear HBM stuck flag on new touch
         mHbmStuck = false;
         mAuthInProgress = true;
-        mEnrollmentSuccess = false;
         
         mFbDownTimeMs.store(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -149,19 +147,16 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void onFingerUp() {
-        LOG(INFO) << __func__;
+        LOG(INFO) << __func__ << " - Framework pointer UP";
         
-        // Check if we had pending cleanup from enrollment
-        bool hadPendingCleanup = mPendingCleanup.load();
-        
-        if (hadPendingCleanup || mEnrollmentSuccess.load()) {
-            LOG(INFO) << "💡 Finger lifted after enrollment - completing cleanup now";
-            // Clean up immediately since finger is now physically up
-            setFingerDown(false);
+        // If we were waiting for the user to lift after enrollment finished
+        if (mPendingCleanup.load()) {
+            LOG(INFO) << "💡 Deferred enrollment cleanup completed via pointer UP";
+            enrolling.store(false);  // Safely exit enroll state now
             mPendingCleanup = false;
             mHbmStuck = false;
-            mEnrollmentSuccess = false;
-            
+            // Clean up now that finger is physically up
+            setFingerDown(false);
             if (!enrolling.load()) {
                 setFodStatus(FOD_STATUS_OFF);
             }
@@ -174,7 +169,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         setFingerDown(false);
         mPendingCleanup = false;
         mHbmStuck = false;
-        mEnrollmentSuccess = false;
         
         if (!enrolling.load()) {
             setFodStatus(FOD_STATUS_OFF);
@@ -185,18 +179,14 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << __func__ << " result: " << result << " vendorCode: " << vendorCode;
         
         if (static_cast<AcquiredInfo>(result) == AcquiredInfo::GOOD) {
-            LOG(INFO) << "✅ Authentication successful";
+            LOG(INFO) << "✅ Acquisition GOOD";
             
-            // CRITICAL FIX: Check if we're enrolling and finger is still down
+            // CRITICAL: If we're enrolling and finger is still down,
+            // defer cleanup to the pointer UP event.
             if (enrolling.load() && mIsFingerDown.load()) {
                 LOG(INFO) << "📝 Enrollment success with finger still down - deferring cleanup";
-                mEnrollmentSuccess = true;
                 mPendingCleanup = true;
-                
-                // DO NOT call setFingerDown(false) here!
-                // Let the framework detect the physical lift
-                
-                // Force HBM to stay on until finger lifts
+                // Keep HBM alive until finger lifts
                 enableHbm();
                 return;
             }
@@ -204,7 +194,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             // Normal success path - finger already lifted or not enrolling
             mAuthInProgress = false;
             mIsScreenOnFod = false;
-            mEnrollmentSuccess = false;
             setFingerDown(false);
             mPendingCleanup = false;
             mHbmStuck = false;
@@ -239,7 +228,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         enrolling.store(false);
         mAuthInProgress = false;
         mIsScreenOnFod = false;
-        mEnrollmentSuccess = false;
+        mPendingCleanup = false;
         forceCleanupIfPressed();
     }
 
@@ -247,28 +236,24 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << __func__;
         mPendingCleanup = false;
         mHbmStuck = false;
-        mEnrollmentSuccess = false;
         enrolling.store(true);
     }
 
     void enroll() {
         LOG(INFO) << __func__;
         enrolling.store(true);
-        mEnrollmentSuccess = false;
     }
 
+    /**
+     * CRITICAL FIX: postEnroll() must NOT clear enrolling.
+     * The enrolling flag must remain true until the finger physically lifts,
+     * so that onAcquired(GOOD) knows to defer cleanup.
+     */
     void postEnroll() {
         LOG(INFO) << __func__;
-        enrolling.store(false);
-        
-        // Only force cleanup if finger is already up
-        if (!mIsFingerDown.load()) {
-            forceCleanupIfPressed();
-        } else {
-            // Finger still down - defer cleanup to onFingerUp
-            LOG(INFO) << "📝 Post-enroll with finger still down - deferring cleanup";
-            mPendingCleanup = true;
-        }
+        // DO NOT set enrolling.store(false) here!
+        // Let the finger lift (onFingerUp) clear it.
+        forceCleanupIfPressed();
     }
 
   private:
@@ -282,8 +267,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::atomic<bool> mIsFingerDown{false};
     std::atomic<bool> mAuthInProgress{false};
     std::atomic<bool> mIsScreenOnFod{false};
-    std::atomic<bool> mEnrollmentSuccess{false};  // NEW: Track enrollment success state
-    
     bool isFpcFod;
     
     std::atomic<uint64_t> mFbDownTimeMs{0};
@@ -366,7 +349,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mHbmStuck = false;
         mAuthInProgress = false;
         mIsScreenOnFod = false;
-        mEnrollmentSuccess = false;
         
         // 4. Force FOD status off
         if (!enrolling.load()) {
@@ -377,13 +359,15 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void forceCleanupIfPressed() {
-        // Rely on the HAL's tracked state since fod_press_status 
-        // is only active during screen-off FOD.
+        // Use mIsFingerDown which tracks the framework's pointer state.
+        // This is set by onFingerDown()/onFingerUp() from Session::onPointerDown/Up.
         bool pressed = mIsFingerDown.load();
 
         if (pressed) {
             mPendingCleanup = true;
-            LOG(INFO) << "UDFPS: Finger held during enrollment finish. Cleanup deferred until framework calls onFingerUp.";
+            LOG(INFO) << "UDFPS: Finger held during enrollment finish. Deferred until pointer UP.";
+            // We intentionally leave enrolling=true here so that onAcquired(GOOD)
+            // will not treat this as a normal authentication and kill the touch IC.
             
             std::lock_guard<std::mutex> lock(cleanup_mutex_);
             if (cleanupThread_.joinable()) {
@@ -393,21 +377,19 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 std::this_thread::sleep_for(std::chrono::milliseconds(3000));
                 if (mPendingCleanup.load()) {
                     LOG(INFO) << "⚠️ Finger still held after 3 seconds, forcing cleanup";
+                    enrolling.store(false);  // Force exit enroll state
                     forceHbmCleanup();
                     mPendingCleanup = false;
                     mHbmStuck = false;
-                    mEnrollmentSuccess = false;
-                    if (!enrolling.load()) {
-                        setFodStatus(FOD_STATUS_OFF);
-                    }
+                    setFodStatus(FOD_STATUS_OFF);
                 }
             });
         } else {
-            // Finger is already physically off the glass
+            // Finger is already off the glass – safe to shut down immediately.
+            enrolling.store(false);
             setFingerDown(false);
             mPendingCleanup = false;
             mHbmStuck = false;
-            mEnrollmentSuccess = false;
             setFodStatus(FOD_STATUS_OFF);
         }
     }
@@ -466,8 +448,15 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
     }
 
+    /**
+     * Screen-Off FOD Monitor Thread
+     * 
+     * This polls /sys/class/touch/touch_dev/fod_press_status for screen-off FOD.
+     * This node is ONLY active when the screen is off.
+     * For screen-on FOD, the framework's pointer events are the source of truth.
+     */
     void fodPressMonitorThread() {
-        LOG(INFO) << "FOD press monitor thread started";
+        LOG(INFO) << "FOD press monitor thread started (screen-off FOD)";
         
         int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
         if (fd < 0) {
@@ -518,30 +507,25 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             LOG(DEBUG) << "fod_press_status changed: " << (pressed ? "pressed" : "released");
             
             if (!pressed) {
-                // FINGER LIFTED - This is the critical path!
-                LOG(INFO) << "💡 Physical finger lift detected";
+                LOG(INFO) << "💡 Screen-off FOD lift detected";
                 
-                // Check if we have pending cleanup from enrollment
-                if (mPendingCleanup.load() || mEnrollmentSuccess.load()) {
-                    LOG(INFO) << "✅ Completing deferred cleanup on physical lift";
-                    // Do the actual cleanup now that finger is physically up
-                    setFingerDown(false);
+                // If we were waiting for enrollment cleanup, complete it now.
+                if (mPendingCleanup.load()) {
+                    LOG(INFO) << "✅ Completing deferred enrollment cleanup on screen-off lift";
+                    enrolling.store(false);
                     mPendingCleanup = false;
                     mHbmStuck = false;
-                    mEnrollmentSuccess = false;
-                    
+                    setFingerDown(false);
                     if (!enrolling.load()) {
                         setFodStatus(FOD_STATUS_OFF);
                     }
                 } else {
-                    // Normal finger up handling
+                    // Normal finger up handling.
                     setFingerDown(false);
-                    
                     if (!enrolling.load()) {
                         setFodStatus(FOD_STATUS_OFF);
                         mPendingCleanup = false;
                         mHbmStuck = false;
-                        mEnrollmentSuccess = false;
                     }
                 }
                 LOG(INFO) << "💡 FOD touch successfully disabled on physical finger release";
@@ -694,7 +678,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         if (!pressed) {
             mAuthInProgress = false;
             mIsScreenOnFod = false;
-            mEnrollmentSuccess = false;
             // Ensure HBM is off on finger up
             forceHbmCleanup();
         }
