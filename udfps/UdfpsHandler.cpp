@@ -185,8 +185,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void cancel() {
         LOG(INFO) << __func__;
         enrolling.store(false);
-        // Trigger HBM cleanup via property
-        android::base::SetProperty("persist.fod.enroll_finish", "1");
         forceCleanupIfPressed();
     }
 
@@ -195,8 +193,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mPendingCleanup = false;
         mHbmStuck = false;
         enrolling.store(true);
-        // Reset the cleanup trigger property
-        android::base::SetProperty("persist.fod.enroll_finish", "0");
     }
 
     void enroll() {
@@ -207,8 +203,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void postEnroll() {
         LOG(INFO) << __func__;
         enrolling.store(false);
-        // Trigger HBM cleanup via property
-        android::base::SetProperty("persist.fod.enroll_finish", "1");
         forceCleanupIfPressed();
     }
 
@@ -276,12 +270,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         
         mIsFingerDown = false;
         mPendingCleanup = false;
-        mHbmStuck = false;
-        
-        // Turn off FOD status
-        if (!enrolling.load()) {
-            setFodStatus(FOD_STATUS_OFF);
-        }
     }
 
     void forceCleanupIfPressed() {
