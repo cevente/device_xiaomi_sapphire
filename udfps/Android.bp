@@ -1,21 +1,146 @@
-//
-// Copyright (C) 2022 The LineageOS Project
-//
-// SPDX-License-Identifier: Apache-2.0
-//
+// Android.bp - Pure Rust UDFPS Handler
+// This completely replaces the C++ implementation
 
-cc_library {
+rust_ffi {
     name: "libudfpshandler",
     vendor: true,
-    srcs: ["UdfpsHandler.cpp"],
-    shared_libs: [
-        "libbase",
+    crate_name: "udfps_handler",
+    srcs: [
+        "src/lib.rs",
+        "src/bindings.rs",
+        "src/handler.rs",
+        "src/monitors.rs",
+        "src/touch.rs",
+        "src/display.rs",
     ],
+    edition: "2021",
+    
+    // Rust dependencies
+    rustlibs: [
+        "liblibc",
+        "libnix",
+    ],
+    
+    // Android system libraries
+    shared_libs: [
+        "liblog",
+        "libcutils",
+        "libbase",
+        "libhidlbase",
+        "libutils",
+    ],
+    
+    // NDK static libraries
     static_libs: [
         "android.hardware.biometrics.fingerprint-V4-ndk",
     ],
+    
+    // Header dependencies for bindgen
     header_libs: [
         "generated_kernel_headers",
         "//hardware/xiaomi:xiaomifingerprint_headers",
+    ],
+    
+    // Rust compiler flags
+    rust_flags: [
+        "-C opt-level=3",
+        "-C lto=true",
+        "-C panic=abort",
+        "-C codegen-units=1",
+        "-C target-cpu=cortex-a76",
+        "-C link-arg=-Wl,--gc-sections",
+        "-C link-arg=-Wl,--as-needed",
+        "-C link-arg=-z,now",
+        "-C link-arg=-z,relro",
+    ],
+    
+    // Bindgen configuration
+    bindgen_flags: [
+        "--allowlist-type=disp_.*",
+        "--allowlist-type=fingerprint_device_t",
+        "--allowlist-type=fingerprint_device",
+        "--allowlist-var=MI_DISP_.*",
+        "--allowlist-var=LHBM_.*",
+        "--allowlist-var=COMMAND_.*",
+        "--allowlist-var=PARAM_.*",
+        "--allowlist-var=FOD_STATUS_.*",
+        "--allowlist-var=TOUCH_.*",
+        "--allowlist-var=THP_.*",
+        "--allowlist-var=MAX_BUF_SIZE",
+        "--blocklist-type=.*__u(8|16|32|64)",
+        "--blocklist-type=.*__s(8|16|32|64)",
+        "--blocklist-type=__builtin_va_list",
+        "--no-layout-tests",
+        "--no-doc-comments",
+        "-Iexternal/libcxx/include",
+        "-Isystem/core/libcutils/include",
+        "-Ihardware/interfaces/biometrics/fingerprint/4.0/default",
+    ],
+    
+    // Feature flags
+    features: [
+        "std",
+        "ndk",
+    ],
+    
+    // Product configuration
+    product_specific: true,
+    vendor_available: true,
+    
+    // Export headers for dependent modules
+    export_include_dirs: ["include"],
+}
+
+// Optional: Rust binary for testing
+rust_binary {
+    name: "udfps_handler_test",
+    vendor: true,
+    crate_name: "udfps_handler_test",
+    srcs: ["tests/test.rs"],
+    edition: "2021",
+    
+    rustlibs: [
+        "libudfpshandler",
+    ],
+    
+    shared_libs: [
+        "liblog",
+        "libcutils",
+    ],
+    
+    product_specific: true,
+}
+
+// Optional: Generate bindings as a separate module
+bindgen {
+    name: "libudfpshandler_bindgen",
+    vendor: true,
+    crate_name: "udfps_bindings",
+    source_stem: "bindings",
+    wrapper_src: "bindings/wrapper.h",
+    
+    header_libs: [
+        "generated_kernel_headers",
+        "//hardware/xiaomi:xiaomifingerprint_headers",
+    ],
+    
+    bindgen_flags: [
+        "--allowlist-type=disp_.*",
+        "--allowlist-type=fingerprint_device_t",
+        "--allowlist-type=fingerprint_device",
+        "--allowlist-var=MI_DISP_.*",
+        "--allowlist-var=LHBM_.*",
+        "--allowlist-var=COMMAND_.*",
+        "--allowlist-var=PARAM_.*",
+        "--allowlist-var=FOD_STATUS_.*",
+        "--allowlist-var=TOUCH_.*",
+        "--allowlist-var=THP_.*",
+        "--allowlist-var=MAX_BUF_SIZE",
+        "--blocklist-type=.*__u(8|16|32|64)",
+        "--blocklist-type=.*__s(8|16|32|64)",
+        "--no-layout-tests",
+        "--no-doc-comments",
+        "-Iexternal/libcxx/include",
+        "-Isystem/core/libcutils/include",
     ],
 }
