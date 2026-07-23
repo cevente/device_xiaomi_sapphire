@@ -16,20 +16,14 @@ nix = { version = "0.28.0", features = ["fs", "ioctl", "poll", "time"] }
 log = "0.4.20"
 static_assertions = "1.1.0"
 thiserror = "1.0.56"
-tracing = { version = "0.1.40", default-features = false, features = ["std"] }
 
 [target.'cfg(target_os="android")'.dependencies]
 android_logger = "0.13.3"
 android-properties = "0.2.2"
 
 [build-dependencies]
-bindgen = { version = "0.69.1", optional = true }
+bindgen = { version = "0.69.1" }
 cc = "1.0.83"
-
-[features]
-default = ["bindgen"]
-bindgen = ["dep:bindgen"]
-no-std = []
 
 [profile.release]
 opt-level = 3
