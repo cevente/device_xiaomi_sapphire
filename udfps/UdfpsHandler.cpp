@@ -149,7 +149,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void onFingerUp() {
         LOG(INFO) << __func__;
         
-        // Check if we had pending cleanup
+        // Check if we had pending cleanup from enrollment
         bool hadPendingCleanup = mPendingCleanup.load();
         
         if (hadPendingCleanup) {
@@ -342,66 +342,36 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void forceCleanupIfPressed() {
-        int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
-        bool pressed = false;
-        if (fd >= 0) {
-            pressed = readBool(fd);
-            close(fd);
-        }
+        // Rely on the HAL's tracked state since fod_press_status 
+        // is only active during screen-off FOD.
+        bool pressed = mIsFingerDown.load();
 
         if (pressed) {
-            // Finger is physically still on the sensor
             mPendingCleanup = true;
-            LOG(INFO) << "UDFPS: Finger held during enrollment finish. Cleanup deferred until lift.";
+            LOG(INFO) << "UDFPS: Finger held during enrollment finish. Cleanup deferred until framework calls onFingerUp.";
             
-            // CRITICAL FIX: DO NOT call setFingerDown(false) here
-            // Let the fodPressMonitorThread handle the clean shutdown when user actually lifts
-            
-            // Cancel any existing cleanup thread
-            {
-                std::lock_guard<std::mutex> lock(cleanup_mutex_);
-                if (cleanupThread_.joinable()) {
-                    cleanupThread_.join();
-                }
+            std::lock_guard<std::mutex> lock(cleanup_mutex_);
+            if (cleanupThread_.joinable()) {
+                cleanupThread_.join();
             }
-            
-            // Start safety timer (this is now just a safety net, not the primary cleanup)
             cleanupThread_ = std::thread([this]() {
-                std::this_thread::sleep_for(std::chrono::milliseconds(5000)); // Increased timeout
-                
-                // Only force cleanup if finger is STILL down after 5 seconds
-                int fd_check = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
-                bool still_pressed = false;
-                if (fd_check >= 0) {
-                    still_pressed = readBool(fd_check);
-                    close(fd_check);
-                }
-                
-                if (still_pressed && mPendingCleanup.load()) {
-                    LOG(INFO) << "⚠️ Finger STILL held after 5 seconds - forcing emergency cleanup";
-                    // Only force if truly stuck - this should rarely happen
+                std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+                if (mPendingCleanup.load()) {
+                    LOG(INFO) << "⚠️ Finger still held after 3 seconds, forcing cleanup";
                     forceHbmCleanup();
                     mPendingCleanup = false;
                     mHbmStuck = false;
                     if (!enrolling.load()) {
                         setFodStatus(FOD_STATUS_OFF);
                     }
-                } else if (mPendingCleanup.load()) {
-                    // Finger lifted naturally, cleanup already handled by monitor thread
-                    LOG(INFO) << "Cleanup timer: finger lifted naturally, no action needed";
-                    mPendingCleanup = false;
                 }
             });
-            
         } else {
-            // Finger is already off the glass - safe to clean up immediately
-            LOG(INFO) << "UDFPS: Finger already lifted, cleaning up immediately";
+            // Finger is already physically off the glass
             setFingerDown(false);
             mPendingCleanup = false;
             mHbmStuck = false;
-            if (!enrolling.load()) {
-                setFodStatus(FOD_STATUS_OFF);
-            }
+            setFodStatus(FOD_STATUS_OFF);
         }
     }
 
