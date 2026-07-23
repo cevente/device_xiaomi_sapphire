@@ -88,7 +88,6 @@ static disp_event_resp* parseDispEvent(int fd) {
 static int getScreenState() {
     int fd = open(SCREEN_STATE_PATH, O_RDONLY);
     if (fd < 0) {
-        LOG(ERROR) << "Failed to open screen_state: " << strerror(errno);
         return -1;
     }
     char buf[4];
@@ -96,7 +95,7 @@ static int getScreenState() {
     close(fd);
     if (len <= 0) return -1;
     buf[len] = '\0';
-    return atoi(buf);  // Returns 1 for screen ON, 0 for OFF
+    return atoi(buf);
 }
 
 static bool isScreenOn() {
@@ -113,7 +112,8 @@ static bool isScreenOff() {
 
 class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
   public:
-    XiaomiSm6225UdfpsHandler() : mDevice(nullptr), isFpcFod(false), mPendingCleanup(false), mHbmStuck(false) {}
+    XiaomiSm6225UdfpsHandler() : mDevice(nullptr), isFpcFod(false), mPendingCleanup(false), 
+                                  mHbmStuck(false), mFodActive(false), mProcessingTouch(false) {}
 
     ~XiaomiSm6225UdfpsHandler() {
         LOG(INFO) << "Destructor called, shutting down threads";
@@ -125,7 +125,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         
         mDevice = device;
         
-        // Open device nodes
         touch_fd_ = android::base::unique_fd(open(TOUCH_DEV_PATH, O_RDWR));
         if (touch_fd_.get() < 0) {
             LOG(ERROR) << "Failed to open touch device: " << strerror(errno);
@@ -136,12 +135,10 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             LOG(ERROR) << "Failed to open display device: " << strerror(errno);
         }
 
-        // Determine fingerprint vendor
         std::string fpVendor = android::base::GetProperty("persist.vendor.sys.fp.vendor", "none");
         LOG(INFO) << "Fingerprint vendor: " << fpVendor;
         isFpcFod = (fpVendor == "fpc_fod");
 
-        // Start monitoring threads
         fodThread_ = std::thread([this]() { fodPressMonitorThread(); });
         dispThread_ = std::thread([this]() { displayEventMonitorThread(); });
         
@@ -155,8 +152,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void onFingerDown(uint32_t /*x*/, uint32_t /*y*/, float /*minor*/, float /*major*/) {
         LOG(INFO) << __func__;
         
-        // Clear HBM stuck flag on new touch
         mHbmStuck = false;
+        mFodActive = true;
         
         mFbDownTimeMs.store(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -170,6 +167,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
     void onFingerUp() {
         LOG(INFO) << __func__;
+        mFodActive = false;
         setFingerDown(false);
         mPendingCleanup = false;
         mHbmStuck = false;
@@ -183,6 +181,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << __func__ << " result: " << result << " vendorCode: " << vendorCode;
         
         if (static_cast<AcquiredInfo>(result) == AcquiredInfo::GOOD) {
+            mFodActive = false;
             setFingerDown(false);
             mPendingCleanup = false;
             mHbmStuck = false;
@@ -198,9 +197,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             setFodStatus(FOD_STATUS_ON);
         }
         
-        // Detect if HBM is being killed while finger is still down
         if (vendorCode == 23 && mIsFingerDown) {
-            LOG(INFO) << "⚠️ HBM killed while finger is still down - potential stuck state detected";
+            LOG(INFO) << "⚠️ HBM killed while finger is still down";
             mHbmStuck = true;
             scheduleHbmCleanup();
         }
@@ -209,6 +207,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void cancel() {
         LOG(INFO) << __func__;
         enrolling.store(false);
+        mFodActive = false;
         forceCleanupIfPressed();
     }
 
@@ -239,6 +238,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::atomic<bool> mPendingCleanup{false};
     std::atomic<bool> mHbmStuck{false};
     std::atomic<bool> mIsFingerDown{false};
+    std::atomic<bool> mFodActive{false};
+    std::atomic<bool> mProcessingTouch{false};
     bool isFpcFod;
     
     std::atomic<uint64_t> mFbDownTimeMs{0};
@@ -247,6 +248,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::mutex disp_mutex_;
     std::mutex device_mutex_;
     std::mutex cleanup_mutex_;
+    std::mutex state_mutex_;
 
     std::thread fodThread_;
     std::thread dispThread_;
@@ -259,41 +261,34 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             cleanupThread_.join();
         }
         cleanupThread_ = std::thread([this]() {
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
             
-            // CRITICAL FIX: Check conditions more carefully
             if (mHbmStuck.load() && mIsFingerDown.load()) {
                 LOG(INFO) << "💡 Force cleaning HBM stuck state";
                 
-                // Don't force cleanup if finger is actually still pressed
+                // Check if finger is still physically pressed
                 int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
+                bool stillPressed = false;
                 if (fd >= 0) {
-                    bool stillPressed = readBool(fd);
+                    stillPressed = readBool(fd);
                     close(fd);
-                    if (stillPressed) {
-                        LOG(WARNING) << "Finger still physically pressed, postponing cleanup";
-                        // Reschedule
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-                        if (mHbmStuck.load()) {
-                            // Check again
-                            fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
-                            if (fd >= 0) {
-                                stillPressed = readBool(fd);
-                                close(fd);
-                                if (!stillPressed) {
-                                    forceHbmCleanup();
-                                } else {
-                                    LOG(WARNING) << "Finger still pressed after 1.5s, forcing anyway";
-                                    forceHbmCleanup();
-                                }
-                            }
-                        }
-                        return;
+                }
+                
+                if (stillPressed) {
+                    LOG(WARNING) << "Finger still pressed, waiting...";
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    
+                    fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
+                    if (fd >= 0) {
+                        stillPressed = readBool(fd);
+                        close(fd);
                     }
                 }
                 
-                forceHbmCleanup();
-                mHbmStuck = false;
+                if (!stillPressed || mFodActive.load() == false) {
+                    forceHbmCleanup();
+                    mHbmStuck = false;
+                }
             }
         });
     }
@@ -301,106 +296,18 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void forceHbmCleanup() {
         LOG(INFO) << "Forcing HBM cleanup";
         
-        // Don't touch HBM if finger is still down
-        if (mIsFingerDown.load()) {
-            LOG(WARNING) << "Finger still down, skipping HBM cleanup";
-            return;
-        }
-        
-        // Force HBM off via display ioctl
         std::lock_guard<std::mutex> lock(disp_mutex_);
         if (disp_fd_.get() >= 0) {
             disp_local_hbm_req req;
             req.base.flag = 0;
             req.base.disp_id = MI_DISP_PRIMARY;
             req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-            if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
-                LOG(ERROR) << "Failed to force HBM off: " << strerror(errno);
-            }
-        }
-        
-        // Reset touch state - BUT DON'T USE THP_FOD_DOWNUP_CTL (1001)
-        // This mode is not supported by the touch driver and causes crashes
-        std::lock_guard<std::mutex> touchLock(touch_mutex_);
-        if (touch_fd_.get() >= 0) {
-            // Use Touch_Fod_Enable (10) instead, which IS supported
-            int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_OFF};
-            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
-                LOG(ERROR) << "Failed to reset touch state: " << strerror(errno);
-            }
+            ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req);
         }
         
         mIsFingerDown = false;
         mPendingCleanup = false;
-    }
-
-    void forceScreenOffFodReset() {
-        LOG(INFO) << "🔄 Force resetting screen-off FOD state";
-        
-        // 1. Disable FOD
-        setFodStatus(FOD_STATUS_OFF);
-        
-        // 2. Reset touch state - use mode 10 not mode 1001
-        {
-            std::lock_guard<std::mutex> lock(touch_mutex_);
-            if (touch_fd_.get() >= 0) {
-                int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_OFF};
-                ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
-            }
-        }
-        
-        // 3. Clear HBM
-        {
-            std::lock_guard<std::mutex> lock(disp_mutex_);
-            if (disp_fd_.get() >= 0) {
-                disp_local_hbm_req req;
-                req.base.flag = 0;
-                req.base.disp_id = MI_DISP_PRIMARY;
-                req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-                ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req);
-            }
-        }
-        
-        // 4. Clear state flags
-        mIsFingerDown = false;
-        mPendingCleanup = false;
-        mHbmStuck = false;
-        
-        // 5. Re-enable FOD if screen is off
-        if (isScreenOff() && isFpcFod) {
-            bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
-            if (isScreenOffEnabled) {
-                LOG(INFO) << "Screen off, re-enabling FOD after reset";
-                setFodStatus(FOD_STATUS_ON);
-            }
-        }
-    }
-
-    void recoverTouchDriver() {
-        LOG(WARNING) << "⚠️ Touch driver in error state, attempting recovery";
-        
-        // 1. Reset FOD mode using mode 10 (supported)
-        {
-            int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_OFF};
-            ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
-        }
-        
-        // 2. Re-initialize touch HAL using mode 1004 (supported)
-        {
-            int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_HAL_INIT_READY, 1};
-            ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
-        }
-        
-        // 3. Small delay for driver to settle
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        
-        // 4. Restore FOD mode if needed
-        if (!enrolling.load() && mIsFingerDown.load()) {
-            int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_ON};
-            ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
-        }
-        
-        LOG(INFO) << "✅ Touch driver recovery attempted";
+        mFodActive = false;
     }
 
     void forceCleanupIfPressed() {
@@ -412,19 +319,20 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
 
         setFingerDown(false);
+        mFodActive = false;
         
         if (pressed) {
             mPendingCleanup = true;
-            LOG(INFO) << "UDFPS: Finger held during enrollment finish. Cleanup deferred until lift.";
+            LOG(INFO) << "UDFPS: Finger held during enrollment finish. Cleanup deferred.";
             
             std::lock_guard<std::mutex> lock(cleanup_mutex_);
             if (cleanupThread_.joinable()) {
                 cleanupThread_.join();
             }
             cleanupThread_ = std::thread([this]() {
-                std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+                std::this_thread::sleep_for(std::chrono::milliseconds(2000));
                 if (mPendingCleanup.load()) {
-                    LOG(INFO) << "⚠️ Finger still held after 3 seconds, forcing cleanup";
+                    LOG(INFO) << "⚠️ Forcing cleanup after timeout";
                     forceHbmCleanup();
                     mPendingCleanup = false;
                     mHbmStuck = false;
@@ -451,26 +359,33 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             }
 
             if (currentState != lastState) {
-                bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
+                bool isScreenOffEnabled = android::base::GetBoolProperty(
+                    "persist.vendor.sys.fp.screen_off", true);
 
                 if (currentState == 0 && isFpcFod && isScreenOffEnabled) {
-                    // Screen OFF: Enable FOD
                     LOG(INFO) << "Screen OFF, enabling FOD";
-                    setFodStatus(FOD_STATUS_ON);
+                    std::lock_guard<std::mutex> lock(state_mutex_);
+                    if (!mProcessingTouch.load() && !mIsFingerDown.load()) {
+                        setFodStatus(FOD_STATUS_ON);
+                    }
                 } else if (currentState == 1 && isFpcFod) {
-                    // Screen ON: FOD must be disabled
                     LOG(INFO) << "Screen ON, disabling FOD";
+                    std::lock_guard<std::mutex> lock(state_mutex_);
                     
-                    // CRITICAL: Force FOD off regardless of enroll state
+                    // CRITICAL: Reset all FOD state on screen on
                     setFodStatus(FOD_STATUS_OFF);
-                    
-                    // Clear any pending state from screen-off FOD
                     mPendingCleanup = false;
                     mHbmStuck = false;
+                    mFodActive = false;
+                    mIsFingerDown = false;
+                    mProcessingTouch = false;
                     
-                    // Ensure touch driver is in normal mode using mode 10
+                    // Wait for driver to settle
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    
+                    // Reset touch state using mode 10 (not 1001)
                     {
-                        std::lock_guard<std::mutex> lock(touch_mutex_);
+                        std::lock_guard<std::mutex> touchLock(touch_mutex_);
                         if (touch_fd_.get() >= 0) {
                             int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_OFF};
                             ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
@@ -552,33 +467,45 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             fodPressStatusPoll.revents = 0;
 
             const bool pressed = readBool(fd);
-            mIsFingerDown = pressed;
             
-            // CRITICAL: Check screen state before processing
+            // Check screen state before processing
             if (isScreenOn()) {
-                LOG(WARNING) << "⚠️ Screen is ON but got fod_press_status event!";
-                LOG(WARNING) << "This means screen-off FOD wasn't properly disabled";
-                
-                // Force cleanup
-                forceScreenOffFodReset();
+                LOG(WARNING) << "⚠️ Screen ON but got fod_press_status event!";
+                // Just clean up and ignore
+                setFodStatus(FOD_STATUS_OFF);
+                mPendingCleanup = false;
+                mHbmStuck = false;
+                mFodActive = false;
+                mProcessingTouch = false;
+                mIsFingerDown = false;
                 continue;
             }
 
-            bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
+            bool isScreenOffEnabled = android::base::GetBoolProperty(
+                "persist.vendor.sys.fp.screen_off", true);
             if (!isScreenOffEnabled) {
-                LOG(INFO) << "UDFPS: Screen-off FOD disabled, ignoring touch";
                 continue;
             }
 
-            LOG(DEBUG) << "fod_press_status changed: " << (pressed ? "pressed" : "released");
+            LOG(DEBUG) << "fod_press_status: " << (pressed ? "pressed" : "released");
+            
+            if (pressed) {
+                mProcessingTouch = true;
+                mFodActive = true;
+            }
+            
             setFingerDown(pressed);
             
             if (!pressed) {
+                mProcessingTouch = false;
+                mFodActive = false;
                 if (mPendingCleanup || !enrolling.load()) {
+                    // Wait for driver to settle
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
                     setFodStatus(FOD_STATUS_OFF);
                     mPendingCleanup = false;
                     mHbmStuck = false;
-                    LOG(INFO) << "💡 FOD touch successfully disabled on physical finger release";
+                    LOG(INFO) << "💡 FOD touch disabled on release";
                 }
             }
         }
@@ -669,10 +596,9 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             return;
         }
 
-        // Block unsupported values - only allow FOD_STATUS_ON (1) and FOD_STATUS_OFF (0)
-        // Mode 1001 (THP_FOD_DOWNUP_CTL) is NOT supported by the touch driver
+        // Only allow valid FOD status values
         if (value != FOD_STATUS_ON && value != FOD_STATUS_OFF) {
-            LOG(WARNING) << "Blocking unsupported FOD value: " << value;
+            LOG(WARNING) << "Invalid FOD value: " << value;
             return;
         }
 
@@ -680,63 +606,52 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
             LOG(ERROR) << "Failed to set FOD status to " << value 
                        << ": " << strerror(errno);
-            
-            // Attempt recovery if this fails
-            if (isScreenOff()) {
-                LOG(WARNING) << "Attempting FOD recovery...";
-                // Try one more time
-                if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
-                    LOG(ERROR) << "FOD recovery failed, disabling FOD";
-                    // Disable FOD to prevent further issues
-                    int disableBuf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_OFF};
-                    ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &disableBuf);
-                }
-            }
         } else {
             LOG(DEBUG) << "Set FOD status to " << value;
         }
     }
 
     void setFingerDown(bool pressed) {
-        bool touchSuccess = false;
-        bool hbmSuccess = false;
-        
-        // Check screen state using thermal node
-        if (isScreenOn()) {
-            LOG(WARNING) << "⚠️ Screen is ON but got FOD touch event!";
-            LOG(WARNING) << "This means screen-off FOD wasn't properly disabled";
-            
-            // Force cleanup immediately
+        // Check screen state - if screen is on, ignore FOD touches
+        if (isScreenOn() && pressed) {
+            LOG(WARNING) << "Screen ON, ignoring FOD touch";
+            mFodActive = false;
+            mProcessingTouch = false;
+            // Force cleanup to reset touch driver state
             forceScreenOffFodReset();
             return;
         }
         
-        // Screen is off, process FOD touch normally
-        LOG(INFO) << "Screen OFF, processing FOD touch: " << (pressed ? "DOWN" : "UP");
+        LOG(INFO) << "FOD touch: " << (pressed ? "DOWN" : "UP") 
+                  << " screen=" << (isScreenOn() ? "ON" : "OFF");
         
-        // IMPORTANT: DO NOT send THP_FOD_DOWNUP_CTL (mode 1001) to touch driver
-        // The fts_ts driver does not support this mode and will enter error state
-        // Use Touch_Fod_Enable (mode 10) instead which IS supported
+        // CRITICAL: For UP events, ALWAYS reset FOD status FIRST
+        // This ensures the touch driver doesn't get stuck with FOD enabled
+        if (!pressed) {
+            // Reset FOD status BEFORE anything else
+            setFodStatus(FOD_STATUS_OFF);
+            
+            // Small delay for driver to process
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
         
-        // 1. Set FOD status using mode 10 (supported)
+        // 1. Send THP_FOD_DOWNUP_CTL (mode 1001) - this IS needed
         {
             std::lock_guard<std::mutex> lock(touch_mutex_);
             if (touch_fd_.get() >= 0) {
-                int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, pressed ? FOD_STATUS_ON : FOD_STATUS_OFF};
-                if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) == 0) {
-                    touchSuccess = true;
-                } else {
+                int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, pressed ? 1 : 0};
+                if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
                     LOG(ERROR) << "Failed to set finger " << (pressed ? "down" : "up") 
                                << ": " << strerror(errno);
-                    // If screen-off FOD touch fails, disable FOD
+                    // If this fails, force reset
                     setFodStatus(FOD_STATUS_OFF);
                     return;
                 }
             }
         }
         
-        // 2. Set HBM only if touch succeeded or we're releasing
-        if (touchSuccess || !pressed) {
+        // 2. Set HBM
+        {
             std::lock_guard<std::mutex> lock(disp_mutex_);
             if (disp_fd_.get() >= 0) {
                 disp_local_hbm_req req;
@@ -744,15 +659,13 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 req.base.disp_id = MI_DISP_PRIMARY;
                 req.local_hbm_value = pressed ? LHBM_TARGET_BRIGHTNESS_WHITE_1000NIT
                                               : LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-                if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) == 0) {
-                    hbmSuccess = true;
-                } else {
+                if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
                     LOG(ERROR) << "Failed to set HBM: " << strerror(errno);
                 }
             }
         }
         
-        // 3. Send fingerprint command (last, optional)
+        // 3. Send fingerprint command
         {
             std::lock_guard<std::mutex> lock(device_mutex_);
             if (mDevice != nullptr) {
@@ -761,20 +674,80 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             }
         }
         
-        // 4. If finger released, re-arm FOD if screen is still off
-        if (!pressed && isScreenOff()) {
-            if (isFpcFod && android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true)) {
-                LOG(INFO) << "Screen still off, re-arming FOD";
-                setFodStatus(FOD_STATUS_ON);
+        // 4. If finger released, ensure FOD is properly cleaned up
+        if (!pressed) {
+            mFodActive = false;
+            mIsFingerDown = false;
+            mProcessingTouch = false;
+            
+            // Wait a bit for the driver to settle
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            
+            // Check if screen is still off
+            if (isScreenOff()) {
+                if (isFpcFod && android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true)) {
+                    LOG(INFO) << "Re-arming FOD after release";
+                    // Clear any pending state first
+                    setFodStatus(FOD_STATUS_OFF);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                    setFodStatus(FOD_STATUS_ON);
+                }
+            } else {
+                // Screen is on, ensure FOD is off
+                setFodStatus(FOD_STATUS_OFF);
+            }
+        } else {
+            mIsFingerDown = true;
+            mFodActive = true;
+        }
+    }
+
+    void forceScreenOffFodReset() {
+        LOG(INFO) << "🔄 Force resetting screen-off FOD state";
+        
+        // 1. Disable FOD
+        setFodStatus(FOD_STATUS_OFF);
+        
+        // Wait for driver to settle
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        
+        // 2. Reset touch state using mode 10 (not 1001)
+        {
+            std::lock_guard<std::mutex> lock(touch_mutex_);
+            if (touch_fd_.get() >= 0) {
+                int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_OFF};
+                ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
             }
         }
         
-        // 5. If HBM failed but touch succeeded, schedule retry
-        if (pressed && touchSuccess && !hbmSuccess) {
-            scheduleHbmCleanup();
+        // 3. Clear HBM
+        {
+            std::lock_guard<std::mutex> lock(disp_mutex_);
+            if (disp_fd_.get() >= 0) {
+                disp_local_hbm_req req;
+                req.base.flag = 0;
+                req.base.disp_id = MI_DISP_PRIMARY;
+                req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
+                ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req);
+            }
         }
         
-        mIsFingerDown = pressed;
+        // 4. Clear state flags
+        mIsFingerDown = false;
+        mPendingCleanup = false;
+        mHbmStuck = false;
+        mFodActive = false;
+        mProcessingTouch = false;
+        
+        // 5. Re-enable FOD if screen is off
+        if (isScreenOff() && isFpcFod) {
+            bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
+            if (isScreenOffEnabled) {
+                LOG(INFO) << "Screen off, re-enabling FOD after reset";
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                setFodStatus(FOD_STATUS_ON);
+            }
+        }
     }
 };
 
