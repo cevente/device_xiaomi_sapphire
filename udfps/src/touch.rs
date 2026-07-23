@@ -11,7 +11,6 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::sync::Mutex;
 
-use nix::ioctl_none_bad;
 use nix::libc::{ioctl, O_RDWR};
 
 use crate::bindings::*;
@@ -30,7 +29,6 @@ impl TouchController {
         }
     }
 
-    /// Initialize touch device
     pub fn init(&self) {
         let path = Path::new(TOUCH_DEV_PATH);
         let file = match File::options()
@@ -51,22 +49,20 @@ impl TouchController {
         log::info!("Touch device opened successfully");
     }
 
-    /// Close touch device
     pub fn close(&self) {
         *self.fd.lock().unwrap() = None;
         log::info!("Touch device closed");
     }
 
-    /// Set FOD status
     pub fn set_fod_status(&self, value: i32) {
         let mut last_status = self.last_fod_status.lock().unwrap();
         if *last_status == value {
-            return; // No change needed
+            return;
         }
 
         if let Some(fd) = self.fd.lock().unwrap().as_ref() {
             let raw_fd = fd.as_raw_fd();
-            let mut buf = [MI_DISP_PRIMARY, ModeType::TouchFodEnable as i32, value];
+            let mut buf = [MI_DISP_PRIMARY, ModeType::Touch_Fod_Enable as i32, value];
             let ptr = buf.as_mut_ptr() as *mut libc::c_void;
 
             unsafe {
@@ -80,11 +76,10 @@ impl TouchController {
         }
     }
 
-    /// Set finger down state
     pub fn set_finger_down(&self, pressed: bool) {
         if let Some(fd) = self.fd.lock().unwrap().as_ref() {
             let raw_fd = fd.as_raw_fd();
-            let mut buf = [MI_DISP_PRIMARY, ModeType::ThpFodDownupCtl as i32, pressed as i32];
+            let mut buf = [MI_DISP_PRIMARY, ModeType::THP_FOD_DOWNUP_CTL as i32, pressed as i32];
             let ptr = buf.as_mut_ptr() as *mut libc::c_void;
 
             unsafe {
@@ -97,14 +92,12 @@ impl TouchController {
         }
     }
 
-    /// Reset touch state
     pub fn reset_state(&self) {
         self.set_finger_down(false);
         self.set_fod_status(FOD_STATUS_OFF);
         log::debug!("Touch state reset");
     }
 
-    /// Read FOD press status
     pub fn read_fod_press_status(&self) -> bool {
         let path = Path::new(FOD_PRESS_STATUS_PATH);
         if let Ok(mut file) = File::open(path) {
