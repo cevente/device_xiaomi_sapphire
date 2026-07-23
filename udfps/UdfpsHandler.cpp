@@ -148,6 +148,24 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
     void onFingerUp() {
         LOG(INFO) << __func__;
+        
+        // Check if we had pending cleanup
+        bool hadPendingCleanup = mPendingCleanup.load();
+        
+        if (hadPendingCleanup) {
+            LOG(INFO) << "💡 Finger lifted during deferred cleanup - completing cleanup now";
+            // Clean up immediately since finger is now physically up
+            setFingerDown(false);
+            mPendingCleanup = false;
+            mHbmStuck = false;
+            
+            if (!enrolling.load()) {
+                setFodStatus(FOD_STATUS_OFF);
+            }
+            return;
+        }
+        
+        // Normal finger up handling
         mAuthInProgress = false;
         mIsScreenOnFod = false;
         setFingerDown(false);
@@ -277,35 +295,50 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void forceHbmCleanup() {
-        LOG(INFO) << "Forcing HBM cleanup";
+        LOG(INFO) << "Forcing HBM cleanup - complete state reset";
         
-        // Force HBM off via display ioctl
-        std::lock_guard<std::mutex> lock(disp_mutex_);
-        if (disp_fd_.get() >= 0) {
-            disp_local_hbm_req req;
-            req.base.flag = 0;
-            req.base.disp_id = MI_DISP_PRIMARY;
-            req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-            if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
-                LOG(ERROR) << "Failed to force HBM off: " << strerror(errno);
-            } else {
-                LOG(INFO) << "✅ HBM forced off";
+        // 1. Force HBM off via display ioctl
+        {
+            std::lock_guard<std::mutex> lock(disp_mutex_);
+            if (disp_fd_.get() >= 0) {
+                disp_local_hbm_req req;
+                req.base.flag = 0;
+                req.base.disp_id = MI_DISP_PRIMARY;
+                req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
+                if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
+                    LOG(ERROR) << "Failed to force HBM off: " << strerror(errno);
+                } else {
+                    LOG(INFO) << "✅ HBM forced off";
+                }
             }
         }
         
-        // Reset touch state
-        std::lock_guard<std::mutex> touchLock(touch_mutex_);
-        if (touch_fd_.get() >= 0) {
-            int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 0};
-            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
-                LOG(ERROR) << "Failed to reset touch state: " << strerror(errno);
+        // 2. Reset touch state
+        {
+            std::lock_guard<std::mutex> lock(touch_mutex_);
+            if (touch_fd_.get() >= 0) {
+                int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 0};
+                if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
+                    LOG(ERROR) << "Failed to reset touch state: " << strerror(errno);
+                } else {
+                    LOG(INFO) << "✅ Touch state reset";
+                }
             }
         }
         
+        // 3. Reset all state flags
         mIsFingerDown = false;
         mPendingCleanup = false;
+        mHbmStuck = false;
         mAuthInProgress = false;
         mIsScreenOnFod = false;
+        
+        // 4. Force FOD status off
+        if (!enrolling.load()) {
+            setFodStatus(FOD_STATUS_OFF);
+        }
+        
+        LOG(INFO) << "✅ Complete cleanup performed";
     }
 
     void forceCleanupIfPressed() {
@@ -316,32 +349,59 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             close(fd);
         }
 
-        setFingerDown(false);
-        
         if (pressed) {
+            // Finger is physically still on the sensor
             mPendingCleanup = true;
             LOG(INFO) << "UDFPS: Finger held during enrollment finish. Cleanup deferred until lift.";
             
-            std::lock_guard<std::mutex> lock(cleanup_mutex_);
-            if (cleanupThread_.joinable()) {
-                cleanupThread_.join();
+            // CRITICAL FIX: DO NOT call setFingerDown(false) here
+            // Let the fodPressMonitorThread handle the clean shutdown when user actually lifts
+            
+            // Cancel any existing cleanup thread
+            {
+                std::lock_guard<std::mutex> lock(cleanup_mutex_);
+                if (cleanupThread_.joinable()) {
+                    cleanupThread_.join();
+                }
             }
+            
+            // Start safety timer (this is now just a safety net, not the primary cleanup)
             cleanupThread_ = std::thread([this]() {
-                std::this_thread::sleep_for(std::chrono::milliseconds(3000));
-                if (mPendingCleanup.load()) {
-                    LOG(INFO) << "⚠️ Finger still held after 3 seconds, forcing cleanup";
+                std::this_thread::sleep_for(std::chrono::milliseconds(5000)); // Increased timeout
+                
+                // Only force cleanup if finger is STILL down after 5 seconds
+                int fd_check = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
+                bool still_pressed = false;
+                if (fd_check >= 0) {
+                    still_pressed = readBool(fd_check);
+                    close(fd_check);
+                }
+                
+                if (still_pressed && mPendingCleanup.load()) {
+                    LOG(INFO) << "⚠️ Finger STILL held after 5 seconds - forcing emergency cleanup";
+                    // Only force if truly stuck - this should rarely happen
                     forceHbmCleanup();
                     mPendingCleanup = false;
                     mHbmStuck = false;
                     if (!enrolling.load()) {
                         setFodStatus(FOD_STATUS_OFF);
                     }
+                } else if (mPendingCleanup.load()) {
+                    // Finger lifted naturally, cleanup already handled by monitor thread
+                    LOG(INFO) << "Cleanup timer: finger lifted naturally, no action needed";
+                    mPendingCleanup = false;
                 }
             });
+            
         } else {
+            // Finger is already off the glass - safe to clean up immediately
+            LOG(INFO) << "UDFPS: Finger already lifted, cleaning up immediately";
+            setFingerDown(false);
             mPendingCleanup = false;
             mHbmStuck = false;
-            setFodStatus(FOD_STATUS_OFF);
+            if (!enrolling.load()) {
+                setFodStatus(FOD_STATUS_OFF);
+            }
         }
     }
 
@@ -444,20 +504,41 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             
             bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
             if (!isScreenOffEnabled && getBrightness() == 0) {
-                LOG(INFO) << "UDFPS: Toque ignorado. Screen-Off desactivado.";
+                LOG(INFO) << "UDFPS: Touch ignored. Screen-Off disabled.";
                 continue;
             }
 
             LOG(DEBUG) << "fod_press_status changed: " << (pressed ? "pressed" : "released");
-            setFingerDown(pressed);
             
             if (!pressed) {
-                if (mPendingCleanup || !enrolling.load()) {
-                    setFodStatus(FOD_STATUS_OFF);
+                // FINGER LIFTED - This is the critical path!
+                LOG(INFO) << "💡 Physical finger lift detected";
+                
+                // Check if we have pending cleanup from enrollment
+                if (mPendingCleanup.load()) {
+                    LOG(INFO) << "✅ Completing deferred cleanup on physical lift";
+                    // Do the actual cleanup now that finger is physically up
+                    setFingerDown(false);
                     mPendingCleanup = false;
                     mHbmStuck = false;
-                    LOG(INFO) << "💡 FOD touch successfully disabled on physical finger release";
+                    
+                    if (!enrolling.load()) {
+                        setFodStatus(FOD_STATUS_OFF);
+                    }
+                } else {
+                    // Normal finger up handling
+                    setFingerDown(false);
+                    
+                    if (!enrolling.load()) {
+                        setFodStatus(FOD_STATUS_OFF);
+                        mPendingCleanup = false;
+                        mHbmStuck = false;
+                    }
                 }
+                LOG(INFO) << "💡 FOD touch successfully disabled on physical finger release";
+            } else {
+                // Finger pressed
+                setFingerDown(true);
             }
             
             // Re-arm the poll by reading again
