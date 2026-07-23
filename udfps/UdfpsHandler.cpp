@@ -422,7 +422,18 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     LOG(INFO) << "Screen OFF, enabling FOD";
                     std::lock_guard<std::mutex> lock(state_mutex_);
                     if (!mProcessingTouch.load() && !mIsFingerDown.load()) {
+                        // Force re-arm FOD
+                        setFodStatus(FOD_STATUS_OFF);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(20));
                         setFodStatus(FOD_STATUS_ON);
+                        
+                        // Re-arm the poll by touching the sysfs node
+                        // This ensures the poll is properly armed for edge-triggered events
+                        int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
+                        if (fd >= 0) {
+                            readBool(fd);
+                            close(fd);
+                        }
                     }
                 } else if (currentState == 1 && isFpcFod) {
                     LOG(INFO) << "Screen ON, disabling FOD";
@@ -497,91 +508,147 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void fodPressMonitorThread() {
         LOG(INFO) << "FOD press monitor thread started";
         
-        int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
-        if (fd < 0) {
-            LOG(ERROR) << "Failed to open " << FOD_PRESS_STATUS_PATH 
-                       << ", error: " << strerror(errno);
-            return;
-        }
-
-        readBool(fd);
-
-        struct pollfd fodPressStatusPoll = {
-            .fd = fd,
-            .events = POLLERR | POLLPRI,
-            .revents = 0,
-        };
-
+        int fd = -1;
+        int reconnectAttempts = 0;
+        const int MAX_RECONNECT_ATTEMPTS = 5;
+        int lastHealthCheck = 0;
+        
         while (isRunning.load()) {
+            // Open/reopen the device
+            if (fd < 0) {
+                fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
+                if (fd < 0) {
+                    LOG(ERROR) << "Failed to open " << FOD_PRESS_STATUS_PATH 
+                               << ", error: " << strerror(errno);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    continue;
+                }
+                reconnectAttempts = 0;
+                
+                // Read initial state to arm the poll
+                readBool(fd);
+                lastHealthCheck = 0;
+            }
+
+            struct pollfd fodPressStatusPoll = {
+                .fd = fd,
+                .events = POLLERR | POLLPRI | POLLIN,
+                .revents = 0,
+            };
+
             int rc = poll(&fodPressStatusPoll, 1, 1000);
             
             if (rc < 0) {
                 if (errno == EINTR) continue;
                 LOG(ERROR) << "Poll failed: " << strerror(errno);
-                break;
+                close(fd);
+                fd = -1;
+                continue;
             }
 
-            if (rc == 0) continue;
+            if (rc == 0) {
+                // Health check: If no events for 5 seconds and screen is off, re-arm
+                lastHealthCheck++;
+                if (lastHealthCheck >= 5 && isScreenOff() && !mProcessingTouch.load()) {
+                    bool isScreenOffEnabled = android::base::GetBoolProperty(
+                        "persist.vendor.sys.fp.screen_off", true);
+                    if (isScreenOffEnabled && isFpcFod) {
+                        LOG(INFO) << "Health check: re-arming FOD";
+                        setFodStatus(FOD_STATUS_OFF);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                        setFodStatus(FOD_STATUS_ON);
+                        
+                        // Re-arm poll
+                        readBool(fd);
+                        lastHealthCheck = 0;
+                    }
+                }
+                continue;
+            }
+            
+            // Reset health check counter on activity
+            lastHealthCheck = 0;
 
-            if (!(fodPressStatusPoll.revents & (POLLERR | POLLPRI))) {
-                if (fodPressStatusPoll.revents & (POLLHUP | POLLNVAL)) {
-                    LOG(ERROR) << "Poll error event: " << fodPressStatusPoll.revents;
+            // Handle poll errors
+            if (fodPressStatusPoll.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+                LOG(ERROR) << "Poll error event: " << fodPressStatusPoll.revents;
+                close(fd);
+                fd = -1;
+                
+                reconnectAttempts++;
+                if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                    LOG(WARNING) << "Attempting to reconnect (" << reconnectAttempts << "/" 
+                                 << MAX_RECONNECT_ATTEMPTS << ")";
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                } else {
+                    LOG(ERROR) << "Max reconnect attempts reached, giving up";
                     break;
                 }
+                continue;
+            }
+
+            if (fodPressStatusPoll.revents & (POLLPRI | POLLIN)) {
+                // Reset revents before processing
                 fodPressStatusPoll.revents = 0;
-                continue;
-            }
-
-            fodPressStatusPoll.revents = 0;
-
-            const bool pressed = readBool(fd);
-            
-            // Check screen state before processing
-            if (isScreenOn()) {
-                LOG(WARNING) << "⚠️ Screen ON but got fod_press_status event!";
-                // Just clean up and ignore
-                setFodStatus(FOD_STATUS_OFF);
-                mPendingCleanup = false;
-                mHbmStuck = false;
-                mFodActive = false;
-                mProcessingTouch = false;
-                mIsFingerDown = false;
-                mHbmLocked = false;
-                disableHbm();
-                continue;
-            }
-
-            bool isScreenOffEnabled = android::base::GetBoolProperty(
-                "persist.vendor.sys.fp.screen_off", true);
-            if (!isScreenOffEnabled) {
-                continue;
-            }
-
-            LOG(DEBUG) << "fod_press_status: " << (pressed ? "pressed" : "released");
-            
-            if (pressed) {
-                mProcessingTouch = true;
-                mFodActive = true;
-            }
-            
-            setFingerDown(pressed);
-            
-            if (!pressed) {
-                mProcessingTouch = false;
-                mFodActive = false;
-                if (mPendingCleanup || !enrolling.load()) {
-                    // Wait for driver to settle
-                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                
+                const bool pressed = readBool(fd);
+                
+                // Check screen state before processing
+                if (isScreenOn()) {
+                    LOG(WARNING) << "⚠️ Screen ON but got fod_press_status event!";
+                    // Clean up and ignore
                     setFodStatus(FOD_STATUS_OFF);
                     mPendingCleanup = false;
                     mHbmStuck = false;
+                    mFodActive = false;
+                    mProcessingTouch = false;
+                    mIsFingerDown = false;
                     mHbmLocked = false;
-                    LOG(INFO) << "💡 FOD touch disabled on release";
+                    disableHbm();
+                    
+                    // Re-arm the poll
+                    readBool(fd);
+                    continue;
                 }
+
+                bool isScreenOffEnabled = android::base::GetBoolProperty(
+                    "persist.vendor.sys.fp.screen_off", true);
+                if (!isScreenOffEnabled) {
+                    readBool(fd);
+                    continue;
+                }
+
+                LOG(DEBUG) << "fod_press_status: " << (pressed ? "pressed" : "released");
+                
+                if (pressed) {
+                    mProcessingTouch = true;
+                    mFodActive = true;
+                }
+                
+                setFingerDown(pressed);
+                
+                if (!pressed) {
+                    mProcessingTouch = false;
+                    mFodActive = false;
+                    if (mPendingCleanup || !enrolling.load()) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                        setFodStatus(FOD_STATUS_OFF);
+                        mPendingCleanup = false;
+                        mHbmStuck = false;
+                        mHbmLocked = false;
+                        LOG(INFO) << "💡 FOD touch disabled on release";
+                    }
+                }
+                
+                // CRITICAL: Re-arm the poll by reading again
+                // This is essential for edge-triggered sysfs nodes
+                readBool(fd);
             }
         }
 
-        close(fd);
+        if (fd >= 0) {
+            close(fd);
+        }
         LOG(INFO) << "FOD press monitor thread stopped";
     }
 
@@ -801,6 +868,13 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     setFodStatus(FOD_STATUS_OFF);
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
                     setFodStatus(FOD_STATUS_ON);
+                    
+                    // Re-arm the poll
+                    int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
+                    if (fd >= 0) {
+                        readBool(fd);
+                        close(fd);
+                    }
                 }
             } else {
                 setFodStatus(FOD_STATUS_OFF);
@@ -843,6 +917,13 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 LOG(INFO) << "Screen off, re-enabling FOD after reset";
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 setFodStatus(FOD_STATUS_ON);
+                
+                // Re-arm the poll
+                int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
+                if (fd >= 0) {
+                    readBool(fd);
+                    close(fd);
+                }
             }
         }
     }
