@@ -185,8 +185,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void cancel() {
         LOG(INFO) << __func__;
         enrolling.store(false);
-        // Set property to stop enrollment monitor
-        android::base::SetProperty("persist.sys.fod.enroll", "0");
+        // Trigger HBM cleanup via property
+        android::base::SetProperty("persist.fod.enroll_finish", "1");
         forceCleanupIfPressed();
     }
 
@@ -195,8 +195,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mPendingCleanup = false;
         mHbmStuck = false;
         enrolling.store(true);
-        // Set property to start enrollment monitor
-        android::base::SetProperty("persist.sys.fod.enroll", "1");
+        // Reset the cleanup trigger property
+        android::base::SetProperty("persist.fod.enroll_finish", "0");
     }
 
     void enroll() {
@@ -207,8 +207,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void postEnroll() {
         LOG(INFO) << __func__;
         enrolling.store(false);
-        // Set property to stop enrollment monitor
-        android::base::SetProperty("persist.sys.fod.enroll", "0");
+        // Trigger HBM cleanup via property
+        android::base::SetProperty("persist.fod.enroll_finish", "1");
         forceCleanupIfPressed();
     }
 
