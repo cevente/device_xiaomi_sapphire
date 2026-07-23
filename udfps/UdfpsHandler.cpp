@@ -113,7 +113,8 @@ static bool isScreenOff() {
 class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
   public:
     XiaomiSm6225UdfpsHandler() : mDevice(nullptr), isFpcFod(false), mPendingCleanup(false), 
-                                  mHbmStuck(false), mFodActive(false), mProcessingTouch(false) {}
+                                  mHbmStuck(false), mFodActive(false), mProcessingTouch(false),
+                                  mHbmLocked(false) {}
 
     ~XiaomiSm6225UdfpsHandler() {
         LOG(INFO) << "Destructor called, shutting down threads";
@@ -180,15 +181,37 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void onAcquired(int32_t result, int32_t vendorCode) {
         LOG(INFO) << __func__ << " result: " << result << " vendorCode: " << vendorCode;
         
+        // CRITICAL: vendorCode 40 = ILLUMINATION_TOO_SLOW
+        // This means HBM wasn't ready in time - force it on
+        if (vendorCode == 40 && mIsFingerDown.load()) {
+            LOG(WARNING) << "⚠️ vendorCode 40 - ILLUMINATION_TOO_SLOW, forcing HBM retry";
+            
+            // Force HBM enable again immediately
+            enableHbm();
+            
+            // Tell fingerprint HAL to retry
+            // The HAL will retry capture after receiving this
+            return;
+        }
+        
         if (static_cast<AcquiredInfo>(result) == AcquiredInfo::GOOD) {
             mFodActive = false;
+            mHbmLocked = false;
             setFingerDown(false);
             mPendingCleanup = false;
             mHbmStuck = false;
+            mProcessingTouch = false;
+            
+            // Cancel any delayed cleanup
+            std::lock_guard<std::mutex> lock(cleanup_mutex_);
+            if (cleanupThread_.joinable()) {
+                cleanupThread_.join();
+            }
             
             if (!enrolling.load()) {
                 setFodStatus(FOD_STATUS_OFF);
             }
+            return;
         }
 
         if (!isFpcFod && vendorCode == 21) {
@@ -200,7 +223,13 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         if (vendorCode == 23 && mIsFingerDown) {
             LOG(INFO) << "⚠️ HBM killed while finger is still down";
             mHbmStuck = true;
-            scheduleHbmCleanup();
+            // Re-enable HBM if we're still in auth
+            if (mHbmLocked.load() || mFodActive.load()) {
+                LOG(INFO) << "HBM locked/rearming - re-enabling";
+                enableHbm();
+            } else {
+                scheduleHbmCleanup();
+            }
         }
     }
 
@@ -208,6 +237,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << __func__;
         enrolling.store(false);
         mFodActive = false;
+        mHbmLocked = false;
         forceCleanupIfPressed();
     }
 
@@ -240,6 +270,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::atomic<bool> mIsFingerDown{false};
     std::atomic<bool> mFodActive{false};
     std::atomic<bool> mProcessingTouch{false};
+    std::atomic<bool> mHbmLocked{false};
     bool isFpcFod;
     
     std::atomic<uint64_t> mFbDownTimeMs{0};
@@ -254,6 +285,38 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::thread dispThread_;
     std::thread screenThread_;
     std::thread cleanupThread_;
+
+    void enableHbm() {
+        std::lock_guard<std::mutex> lock(disp_mutex_);
+        if (disp_fd_.get() >= 0) {
+            disp_local_hbm_req req;
+            req.base.flag = 0;
+            req.base.disp_id = MI_DISP_PRIMARY;
+            req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_WHITE_1000NIT;
+            if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
+                LOG(ERROR) << "Failed to enable HBM: " << strerror(errno);
+            } else {
+                LOG(INFO) << "✅ HBM enabled";
+                mHbmLocked = true;
+            }
+        }
+    }
+
+    void disableHbm() {
+        std::lock_guard<std::mutex> lock(disp_mutex_);
+        if (disp_fd_.get() >= 0) {
+            disp_local_hbm_req req;
+            req.base.flag = 0;
+            req.base.disp_id = MI_DISP_PRIMARY;
+            req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
+            if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
+                LOG(ERROR) << "Failed to disable HBM: " << strerror(errno);
+            } else {
+                LOG(INFO) << "✅ HBM disabled";
+                mHbmLocked = false;
+            }
+        }
+    }
 
     void scheduleHbmCleanup() {
         std::lock_guard<std::mutex> lock(cleanup_mutex_);
@@ -296,18 +359,11 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void forceHbmCleanup() {
         LOG(INFO) << "Forcing HBM cleanup";
         
-        std::lock_guard<std::mutex> lock(disp_mutex_);
-        if (disp_fd_.get() >= 0) {
-            disp_local_hbm_req req;
-            req.base.flag = 0;
-            req.base.disp_id = MI_DISP_PRIMARY;
-            req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-            ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req);
-        }
-        
+        disableHbm();
         mIsFingerDown = false;
         mPendingCleanup = false;
         mFodActive = false;
+        mHbmLocked = false;
     }
 
     void forceCleanupIfPressed() {
@@ -372,13 +428,34 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     LOG(INFO) << "Screen ON, disabling FOD";
                     std::lock_guard<std::mutex> lock(state_mutex_);
                     
-                    // CRITICAL: Reset all FOD state on screen on
+                    // Don't disable FOD if authentication is in progress
+                    if (mProcessingTouch.load() || mIsFingerDown.load()) {
+                        LOG(INFO) << "Authentication in progress, delaying FOD disable";
+                        
+                        // Schedule delayed cleanup
+                        std::lock_guard<std::mutex> cleanupLock(cleanup_mutex_);
+                        if (cleanupThread_.joinable()) {
+                            cleanupThread_.join();
+                        }
+                        cleanupThread_ = std::thread([this]() {
+                            int waitCount = 0;
+                            while (waitCount < 10 && (mProcessingTouch.load() || mIsFingerDown.load())) {
+                                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                                waitCount++;
+                            }
+                            LOG(INFO) << "Delayed FOD cleanup after auth";
+                            forceScreenOffFodReset();
+                        });
+                        return;
+                    }
+                    
                     setFodStatus(FOD_STATUS_OFF);
                     mPendingCleanup = false;
                     mHbmStuck = false;
                     mFodActive = false;
                     mIsFingerDown = false;
                     mProcessingTouch = false;
+                    mHbmLocked = false;
                     
                     // Wait for driver to settle
                     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -393,16 +470,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     }
                     
                     // Force HBM off
-                    {
-                        std::lock_guard<std::mutex> lock(disp_mutex_);
-                        if (disp_fd_.get() >= 0) {
-                            disp_local_hbm_req req;
-                            req.base.flag = 0;
-                            req.base.disp_id = MI_DISP_PRIMARY;
-                            req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-                            ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req);
-                        }
-                    }
+                    disableHbm();
                 }
                 lastState = currentState;
             }
@@ -478,6 +546,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 mFodActive = false;
                 mProcessingTouch = false;
                 mIsFingerDown = false;
+                mHbmLocked = false;
+                disableHbm();
                 continue;
             }
 
@@ -505,6 +575,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     setFodStatus(FOD_STATUS_OFF);
                     mPendingCleanup = false;
                     mHbmStuck = false;
+                    mHbmLocked = false;
                     LOG(INFO) << "💡 FOD touch disabled on release";
                 }
             }
@@ -612,30 +683,79 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void setFingerDown(bool pressed) {
-        // Check screen state - if screen is on, ignore FOD touches
-        if (isScreenOn() && pressed) {
-            LOG(WARNING) << "Screen ON, ignoring FOD touch";
-            mFodActive = false;
-            mProcessingTouch = false;
-            // Force cleanup to reset touch driver state
-            forceScreenOffFodReset();
+        // SCREEN-ON FOD: Handle separately
+        if (isScreenOn()) {
+            if (pressed) {
+                LOG(INFO) << "Screen ON FOD touch: DOWN";
+                // Enable HBM for screen-on FOD
+                enableHbm();
+                mFodActive = true;
+                mIsFingerDown = true;
+                mHbmLocked = true;
+                
+                // Send touch command
+                {
+                    std::lock_guard<std::mutex> lock(touch_mutex_);
+                    if (touch_fd_.get() >= 0) {
+                        int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 1};
+                        ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
+                    }
+                }
+                
+                // Send fingerprint command
+                {
+                    std::lock_guard<std::mutex> lock(device_mutex_);
+                    if (mDevice != nullptr) {
+                        mDevice->extCmd(mDevice, COMMAND_FOD_PRESS_STATUS, PARAM_FOD_PRESSED);
+                    }
+                }
+            } else {
+                LOG(INFO) << "Screen ON FOD touch: UP";
+                disableHbm();
+                mFodActive = false;
+                mIsFingerDown = false;
+                mHbmLocked = false;
+                
+                // Send touch command
+                {
+                    std::lock_guard<std::mutex> lock(touch_mutex_);
+                    if (touch_fd_.get() >= 0) {
+                        int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 0};
+                        ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
+                    }
+                }
+                
+                // Send fingerprint command
+                {
+                    std::lock_guard<std::mutex> lock(device_mutex_);
+                    if (mDevice != nullptr) {
+                        mDevice->extCmd(mDevice, COMMAND_FOD_PRESS_STATUS, PARAM_FOD_RELEASED);
+                    }
+                }
+            }
             return;
         }
         
-        LOG(INFO) << "FOD touch: " << (pressed ? "DOWN" : "UP") 
-                  << " screen=" << (isScreenOn() ? "ON" : "OFF");
+        // SCREEN-OFF FOD: Handle normally
+        LOG(INFO) << "FOD touch: " << (pressed ? "DOWN" : "UP") << " screen=OFF";
         
-        // CRITICAL: For UP events, ALWAYS reset FOD status FIRST
-        // This ensures the touch driver doesn't get stuck with FOD enabled
         if (!pressed) {
-            // Reset FOD status BEFORE anything else
+            // For UP events, reset FOD status first
             setFodStatus(FOD_STATUS_OFF);
-            
-            // Small delay for driver to process
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         
-        // 1. Send THP_FOD_DOWNUP_CTL (mode 1001) - this IS needed
+        // For DOWN events, ENABLE HBM FIRST before anything else
+        if (pressed) {
+            LOG(INFO) << "Screen OFF FOD: enabling HBM first";
+            enableHbm();
+            mHbmLocked = true;
+            
+            // Give display driver time to actually enable HBM
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        }
+        
+        // 1. Send THP_FOD_DOWNUP_CTL (mode 1001)
         {
             std::lock_guard<std::mutex> lock(touch_mutex_);
             if (touch_fd_.get() >= 0) {
@@ -643,29 +763,15 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
                     LOG(ERROR) << "Failed to set finger " << (pressed ? "down" : "up") 
                                << ": " << strerror(errno);
-                    // If this fails, force reset
-                    setFodStatus(FOD_STATUS_OFF);
+                    if (pressed) {
+                        disableHbm();
+                    }
                     return;
                 }
             }
         }
         
-        // 2. Set HBM
-        {
-            std::lock_guard<std::mutex> lock(disp_mutex_);
-            if (disp_fd_.get() >= 0) {
-                disp_local_hbm_req req;
-                req.base.flag = 0;
-                req.base.disp_id = MI_DISP_PRIMARY;
-                req.local_hbm_value = pressed ? LHBM_TARGET_BRIGHTNESS_WHITE_1000NIT
-                                              : LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-                if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
-                    LOG(ERROR) << "Failed to set HBM: " << strerror(errno);
-                }
-            }
-        }
-        
-        // 3. Send fingerprint command
+        // 2. Send fingerprint command
         {
             std::lock_guard<std::mutex> lock(device_mutex_);
             if (mDevice != nullptr) {
@@ -674,44 +780,46 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             }
         }
         
-        // 4. If finger released, ensure FOD is properly cleaned up
-        if (!pressed) {
+        // 3. Handle state updates
+        if (pressed) {
+            mFodActive = true;
+            mIsFingerDown = true;
+            mProcessingTouch = true;
+        } else {
             mFodActive = false;
             mIsFingerDown = false;
             mProcessingTouch = false;
+            mHbmLocked = false;
             
-            // Wait a bit for the driver to settle
+            // Wait for driver to settle
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             
-            // Check if screen is still off
+            // Re-arm FOD if screen is still off
             if (isScreenOff()) {
                 if (isFpcFod && android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true)) {
                     LOG(INFO) << "Re-arming FOD after release";
-                    // Clear any pending state first
                     setFodStatus(FOD_STATUS_OFF);
                     std::this_thread::sleep_for(std::chrono::milliseconds(20));
                     setFodStatus(FOD_STATUS_ON);
                 }
             } else {
-                // Screen is on, ensure FOD is off
                 setFodStatus(FOD_STATUS_OFF);
             }
-        } else {
-            mIsFingerDown = true;
-            mFodActive = true;
         }
     }
 
     void forceScreenOffFodReset() {
         LOG(INFO) << "🔄 Force resetting screen-off FOD state";
         
+        // Unlock HBM first
+        mHbmLocked = false;
+        disableHbm();
+        
         // 1. Disable FOD
         setFodStatus(FOD_STATUS_OFF);
-        
-        // Wait for driver to settle
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         
-        // 2. Reset touch state using mode 10 (not 1001)
+        // 2. Reset touch state
         {
             std::lock_guard<std::mutex> lock(touch_mutex_);
             if (touch_fd_.get() >= 0) {
@@ -720,26 +828,15 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             }
         }
         
-        // 3. Clear HBM
-        {
-            std::lock_guard<std::mutex> lock(disp_mutex_);
-            if (disp_fd_.get() >= 0) {
-                disp_local_hbm_req req;
-                req.base.flag = 0;
-                req.base.disp_id = MI_DISP_PRIMARY;
-                req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-                ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req);
-            }
-        }
-        
-        // 4. Clear state flags
+        // 3. Clear state flags
         mIsFingerDown = false;
         mPendingCleanup = false;
         mHbmStuck = false;
         mFodActive = false;
         mProcessingTouch = false;
+        mHbmLocked = false;
         
-        // 5. Re-enable FOD if screen is off
+        // 4. Re-enable FOD if screen is off
         if (isScreenOff() && isFpcFod) {
             bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
             if (isScreenOffEnabled) {
