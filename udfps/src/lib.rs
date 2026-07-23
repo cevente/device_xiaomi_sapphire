@@ -6,10 +6,7 @@
 
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-#![cfg_attr(not(feature = "std"), no_std)]
-
-#[cfg(feature = "std")]
-extern crate std;
+#![allow(dead_code)]
 
 // Module declarations
 mod bindings;
