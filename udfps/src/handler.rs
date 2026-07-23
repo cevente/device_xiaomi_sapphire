@@ -6,7 +6,7 @@
 
 use core::ffi::c_void;
 use core::ptr;
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicI32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -74,7 +74,6 @@ impl XiaomiSm6225UdfpsHandler {
         }
     }
 
-    /// Initialize the handler
     pub fn init(&mut self, device: *mut fingerprint_device_t) {
         log::info!("Initializing UDFPS handler (Rust)");
         self.device = device;
@@ -108,7 +107,6 @@ impl XiaomiSm6225UdfpsHandler {
         log::info!("UDFPS handler initialized (Rust)");
     }
 
-    /// Schedule HBM cleanup
     fn schedule_hbm_cleanup(&self) {
         let mut guard = self.cleanup_thread.lock().unwrap();
         if let Some(thread) = guard.take() {
@@ -131,7 +129,6 @@ impl XiaomiSm6225UdfpsHandler {
         }));
     }
 
-    /// Force cleanup if finger is pressed
     fn force_cleanup_if_pressed(&self) {
         let pressed = self.fod_monitor.is_pressed();
 
@@ -172,7 +169,6 @@ impl XiaomiSm6225UdfpsHandler {
         }
     }
 
-    /// Set finger down state
     fn set_finger_down(&self, pressed: bool) {
         self.touch_controller.set_finger_down(pressed);
         self.display_controller.set_hbm(pressed);
@@ -297,21 +293,18 @@ impl Drop for XiaomiSm6225UdfpsHandler {
         log::info!("Dropping UDFPS handler (Rust)");
         self.is_running.store(false, Ordering::SeqCst);
         
-        // Stop monitors
         self.fod_monitor.stop();
         self.display_monitor.stop();
         if let Some(ref monitor) = self.screen_monitor {
             monitor.stop();
         }
 
-        // Join cleanup thread
         if let Ok(mut guard) = self.cleanup_thread.lock() {
             if let Some(thread) = guard.take() {
                 let _ = thread.join();
             }
         }
 
-        // Clean up devices
         self.touch_controller.close();
         self.display_controller.close();
     }
