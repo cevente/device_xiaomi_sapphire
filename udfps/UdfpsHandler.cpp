@@ -89,7 +89,8 @@ static disp_event_resp* parseDispEvent(int fd) {
 
 class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
   public:
-    XiaomiSm6225UdfpsHandler() : mDevice(nullptr), isFpcFod(false), mPendingCleanup(false), mHbmStuck(false) {}
+    XiaomiSm6225UdfpsHandler() : mDevice(nullptr), isFpcFod(false), mPendingCleanup(false), 
+                                  mHbmStuck(false), mAuthInProgress(false) {}
 
     ~XiaomiSm6225UdfpsHandler() {
         LOG(INFO) << "Destructor called, shutting down threads";
@@ -133,6 +134,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         
         // Clear HBM stuck flag on new touch
         mHbmStuck = false;
+        mAuthInProgress = true;
         
         mFbDownTimeMs.store(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -146,6 +148,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
     void onFingerUp() {
         LOG(INFO) << __func__;
+        mAuthInProgress = false;
         setFingerDown(false);
         mPendingCleanup = false;
         mHbmStuck = false;
@@ -159,6 +162,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << __func__ << " result: " << result << " vendorCode: " << vendorCode;
         
         if (static_cast<AcquiredInfo>(result) == AcquiredInfo::GOOD) {
+            mAuthInProgress = false;
             setFingerDown(false);
             mPendingCleanup = false;
             mHbmStuck = false;
@@ -176,8 +180,10 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         
         // Detect if HBM is being killed while finger is still down
         if (vendorCode == 23 && mIsFingerDown) {
-            LOG(INFO) << "⚠️ HBM killed while finger is still down - potential stuck state detected";
+            LOG(INFO) << "⚠️ HBM killed while finger is still down - re-enabling";
             mHbmStuck = true;
+            // Re-enable HBM immediately
+            enableHbm();
             scheduleHbmCleanup();
         }
     }
@@ -185,6 +191,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void cancel() {
         LOG(INFO) << __func__;
         enrolling.store(false);
+        mAuthInProgress = false;
         forceCleanupIfPressed();
     }
 
@@ -215,6 +222,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::atomic<bool> mPendingCleanup{false};
     std::atomic<bool> mHbmStuck{false};
     std::atomic<bool> mIsFingerDown{false};
+    std::atomic<bool> mAuthInProgress{false};
     bool isFpcFod;
     
     std::atomic<uint64_t> mFbDownTimeMs{0};
@@ -228,6 +236,21 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::thread dispThread_;
     std::thread screenThread_;
     std::thread cleanupThread_;
+
+    void enableHbm() {
+        std::lock_guard<std::mutex> lock(disp_mutex_);
+        if (disp_fd_.get() >= 0) {
+            disp_local_hbm_req req;
+            req.base.flag = 0;
+            req.base.disp_id = MI_DISP_PRIMARY;
+            req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_WHITE_1000NIT;
+            if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
+                LOG(ERROR) << "Failed to enable HBM: " << strerror(errno);
+            } else {
+                LOG(INFO) << "✅ HBM enabled";
+            }
+        }
+    }
 
     void scheduleHbmCleanup() {
         std::lock_guard<std::mutex> lock(cleanup_mutex_);
@@ -373,7 +396,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
         struct pollfd fodPressStatusPoll = {
             .fd = fd,
-            .events = POLLERR | POLLPRI | POLLIN,  // FIX: Added POLLIN
+            .events = POLLERR | POLLPRI,
             .revents = 0,
         };
 
@@ -388,7 +411,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
             if (rc == 0) continue;
 
-            if (!(fodPressStatusPoll.revents & (POLLERR | POLLPRI | POLLIN))) {
+            if (!(fodPressStatusPoll.revents & (POLLERR | POLLPRI))) {
                 if (fodPressStatusPoll.revents & (POLLHUP | POLLNVAL)) {
                     LOG(ERROR) << "Poll error event: " << fodPressStatusPoll.revents;
                     break;
@@ -420,7 +443,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 }
             }
             
-            // FIX: Re-arm the poll by reading again after processing
+            // CRITICAL: Re-arm the poll by reading again
             // This is essential for edge-triggered sysfs nodes
             readBool(fd);
         }
@@ -520,6 +543,36 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void setFingerDown(bool pressed) {
+        // SCREEN-ON FOD: Handle separately to keep HBM alive
+        int brightness = getBrightness();
+        bool isScreenOn = (brightness > 0);
+        
+        if (isScreenOn) {
+            if (pressed) {
+                LOG(INFO) << "Screen ON FOD: DOWN - enabling HBM";
+                // Enable HBM for screen-on FOD
+                enableHbm();
+                mAuthInProgress = true;
+            } else {
+                LOG(INFO) << "Screen ON FOD: UP - disabling HBM";
+                // Only disable HBM if auth is complete
+                if (!mAuthInProgress.load()) {
+                    // Force HBM off via display ioctl
+                    std::lock_guard<std::mutex> lock(disp_mutex_);
+                    if (disp_fd_.get() >= 0) {
+                        disp_local_hbm_req req;
+                        req.base.flag = 0;
+                        req.base.disp_id = MI_DISP_PRIMARY;
+                        req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
+                        ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req);
+                    }
+                } else {
+                    LOG(INFO) << "Auth still in progress, keeping HBM on";
+                }
+            }
+        }
+        
+        // Always send touch and fingerprint commands
         {
             std::lock_guard<std::mutex> lock(touch_mutex_);
             if (touch_fd_.get() >= 0) {
@@ -553,6 +606,10 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
         
         mIsFingerDown = pressed;
+        
+        if (!pressed) {
+            mAuthInProgress = false;
+        }
     }
 };
 
