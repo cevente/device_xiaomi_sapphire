@@ -114,7 +114,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
   public:
     XiaomiSm6225UdfpsHandler() : mDevice(nullptr), isFpcFod(false), mPendingCleanup(false), 
                                   mHbmStuck(false), mFodActive(false), mProcessingTouch(false),
-                                  mHbmLocked(false) {}
+                                  mHbmLocked(false), mAuthInProgress(false) {}
 
     ~XiaomiSm6225UdfpsHandler() {
         LOG(INFO) << "Destructor called, shutting down threads";
@@ -155,6 +155,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         
         mHbmStuck = false;
         mFodActive = true;
+        mAuthInProgress = true;
         
         mFbDownTimeMs.store(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -169,6 +170,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void onFingerUp() {
         LOG(INFO) << __func__;
         mFodActive = false;
+        mAuthInProgress = false;
         setFingerDown(false);
         mPendingCleanup = false;
         mHbmStuck = false;
@@ -182,20 +184,41 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << __func__ << " result: " << result << " vendorCode: " << vendorCode;
         
         // CRITICAL: vendorCode 40 = ILLUMINATION_TOO_SLOW
-        // This means HBM wasn't ready in time - force it on
+        // This means HBM wasn't ready in time - force it on and keep it on
         if (vendorCode == 40 && mIsFingerDown.load()) {
             LOG(WARNING) << "⚠️ vendorCode 40 - ILLUMINATION_TOO_SLOW, forcing HBM retry";
             
             // Force HBM enable again immediately
             enableHbm();
+            mHbmLocked = true;
+            
+            // Keep HBM on for longer - schedule a refresh
+            scheduleHbmRefresh();
             
             // Tell fingerprint HAL to retry
-            // The HAL will retry capture after receiving this
+            return;
+        }
+        
+        // vendorCode 23 = HBM killed while finger down
+        // This is the main culprit for screen-on FOD failures
+        if (vendorCode == 23 && mIsFingerDown.load()) {
+            LOG(WARNING) << "⚠️ vendorCode 23 - HBM killed while finger is still down";
+            mHbmStuck = true;
+            
+            // CRITICAL: Re-enable HBM immediately and keep it locked
+            // Don't let the system kill HBM during authentication
+            enableHbm();
+            mHbmLocked = true;
+            
+            // Schedule a refresh to keep HBM alive
+            scheduleHbmRefresh();
             return;
         }
         
         if (static_cast<AcquiredInfo>(result) == AcquiredInfo::GOOD) {
+            LOG(INFO) << "✅ Authentication successful";
             mFodActive = false;
+            mAuthInProgress = false;
             mHbmLocked = false;
             setFingerDown(false);
             mPendingCleanup = false;
@@ -219,24 +242,13 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         } else if (isFpcFod && vendorCode == 22) {
             setFodStatus(FOD_STATUS_ON);
         }
-        
-        if (vendorCode == 23 && mIsFingerDown) {
-            LOG(INFO) << "⚠️ HBM killed while finger is still down";
-            mHbmStuck = true;
-            // Re-enable HBM if we're still in auth
-            if (mHbmLocked.load() || mFodActive.load()) {
-                LOG(INFO) << "HBM locked/rearming - re-enabling";
-                enableHbm();
-            } else {
-                scheduleHbmCleanup();
-            }
-        }
     }
 
     void cancel() {
         LOG(INFO) << __func__;
         enrolling.store(false);
         mFodActive = false;
+        mAuthInProgress = false;
         mHbmLocked = false;
         forceCleanupIfPressed();
     }
@@ -271,6 +283,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::atomic<bool> mFodActive{false};
     std::atomic<bool> mProcessingTouch{false};
     std::atomic<bool> mHbmLocked{false};
+    std::atomic<bool> mAuthInProgress{false};
     bool isFpcFod;
     
     std::atomic<uint64_t> mFbDownTimeMs{0};
@@ -285,6 +298,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::thread dispThread_;
     std::thread screenThread_;
     std::thread cleanupThread_;
+    std::thread refreshThread_;
 
     void enableHbm() {
         std::lock_guard<std::mutex> lock(disp_mutex_);
@@ -303,6 +317,12 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void disableHbm() {
+        // Don't disable HBM if authentication is in progress
+        if (mAuthInProgress.load() || mIsFingerDown.load()) {
+            LOG(INFO) << "Auth in progress, not disabling HBM";
+            return;
+        }
+        
         std::lock_guard<std::mutex> lock(disp_mutex_);
         if (disp_fd_.get() >= 0) {
             disp_local_hbm_req req;
@@ -318,13 +338,44 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
     }
 
+    void scheduleHbmRefresh() {
+        std::lock_guard<std::mutex> lock(cleanup_mutex_);
+        if (refreshThread_.joinable()) {
+            refreshThread_.join();
+        }
+        refreshThread_ = std::thread([this]() {
+            int refreshCount = 0;
+            const int MAX_REFRESHES = 10; // 5 seconds total (500ms * 10)
+            
+            while (refreshCount < MAX_REFRESHES && 
+                   (mIsFingerDown.load() || mAuthInProgress.load())) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                
+                // Refresh HBM if still needed
+                if (mIsFingerDown.load() || mAuthInProgress.load()) {
+                    LOG(INFO) << "🔄 Refreshing HBM (count: " << refreshCount + 1 << ")";
+                    enableHbm();
+                }
+                refreshCount++;
+            }
+            
+            if (mIsFingerDown.load() || mAuthInProgress.load()) {
+                LOG(WARNING) << "⚠️ HBM refresh timeout, auth still in progress";
+                // One final attempt
+                enableHbm();
+            }
+            
+            LOG(INFO) << "HBM refresh thread finished";
+        });
+    }
+
     void scheduleHbmCleanup() {
         std::lock_guard<std::mutex> lock(cleanup_mutex_);
         if (cleanupThread_.joinable()) {
             cleanupThread_.join();
         }
         cleanupThread_ = std::thread([this]() {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
             
             if (mHbmStuck.load() && mIsFingerDown.load()) {
                 LOG(INFO) << "💡 Force cleaning HBM stuck state";
@@ -359,11 +410,16 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void forceHbmCleanup() {
         LOG(INFO) << "Forcing HBM cleanup";
         
-        disableHbm();
-        mIsFingerDown = false;
-        mPendingCleanup = false;
-        mFodActive = false;
-        mHbmLocked = false;
+        // Only force if not in auth
+        if (!mAuthInProgress.load()) {
+            disableHbm();
+            mIsFingerDown = false;
+            mPendingCleanup = false;
+            mFodActive = false;
+            mHbmLocked = false;
+        } else {
+            LOG(INFO) << "Auth in progress, not forcing HBM cleanup";
+        }
     }
 
     void forceCleanupIfPressed() {
@@ -376,6 +432,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
         setFingerDown(false);
         mFodActive = false;
+        mAuthInProgress = false;
         
         if (pressed) {
             mPendingCleanup = true;
@@ -428,7 +485,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                         setFodStatus(FOD_STATUS_ON);
                         
                         // Re-arm the poll by touching the sysfs node
-                        // This ensures the poll is properly armed for edge-triggered events
                         int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
                         if (fd >= 0) {
                             readBool(fd);
@@ -440,7 +496,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     std::lock_guard<std::mutex> lock(state_mutex_);
                     
                     // Don't disable FOD if authentication is in progress
-                    if (mProcessingTouch.load() || mIsFingerDown.load()) {
+                    if (mProcessingTouch.load() || mIsFingerDown.load() || mAuthInProgress.load()) {
                         LOG(INFO) << "Authentication in progress, delaying FOD disable";
                         
                         // Schedule delayed cleanup
@@ -450,8 +506,9 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                         }
                         cleanupThread_ = std::thread([this]() {
                             int waitCount = 0;
-                            while (waitCount < 10 && (mProcessingTouch.load() || mIsFingerDown.load())) {
-                                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                            while (waitCount < 15 && (mProcessingTouch.load() || 
+                                   mIsFingerDown.load() || mAuthInProgress.load())) {
+                                std::this_thread::sleep_for(std::chrono::milliseconds(100));
                                 waitCount++;
                             }
                             LOG(INFO) << "Delayed FOD cleanup after auth";
@@ -467,11 +524,12 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     mIsFingerDown = false;
                     mProcessingTouch = false;
                     mHbmLocked = false;
+                    mAuthInProgress = false;
                     
                     // Wait for driver to settle
                     std::this_thread::sleep_for(std::chrono::milliseconds(50));
                     
-                    // Reset touch state using mode 10 (not 1001)
+                    // Reset touch state using mode 10
                     {
                         std::lock_guard<std::mutex> touchLock(touch_mutex_);
                         if (touch_fd_.get() >= 0) {
@@ -502,6 +560,9 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
         if (cleanupThread_.joinable()) {
             cleanupThread_.join();
+        }
+        if (refreshThread_.joinable()) {
+            refreshThread_.join();
         }
     }
 
@@ -604,6 +665,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     mProcessingTouch = false;
                     mIsFingerDown = false;
                     mHbmLocked = false;
+                    mAuthInProgress = false;
                     disableHbm();
                     
                     // Re-arm the poll
@@ -623,6 +685,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 if (pressed) {
                     mProcessingTouch = true;
                     mFodActive = true;
+                    mAuthInProgress = true;
                 }
                 
                 setFingerDown(pressed);
@@ -630,6 +693,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 if (!pressed) {
                     mProcessingTouch = false;
                     mFodActive = false;
+                    mAuthInProgress = false;
                     if (mPendingCleanup || !enrolling.load()) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(20));
                         setFodStatus(FOD_STATUS_OFF);
@@ -640,8 +704,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     }
                 }
                 
-                // CRITICAL: Re-arm the poll by reading again
-                // This is essential for edge-triggered sysfs nodes
+                // Re-arm the poll by reading again
                 readBool(fd);
             }
         }
@@ -750,15 +813,19 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void setFingerDown(bool pressed) {
-        // SCREEN-ON FOD: Handle separately
+        // SCREEN-ON FOD: Handle separately - keep HBM alive during auth
         if (isScreenOn()) {
             if (pressed) {
                 LOG(INFO) << "Screen ON FOD touch: DOWN";
                 // Enable HBM for screen-on FOD
                 enableHbm();
+                mHbmLocked = true;
                 mFodActive = true;
                 mIsFingerDown = true;
-                mHbmLocked = true;
+                mAuthInProgress = true;
+                
+                // Start HBM refresh thread to keep it alive during auth
+                scheduleHbmRefresh();
                 
                 // Send touch command
                 {
@@ -778,10 +845,17 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 }
             } else {
                 LOG(INFO) << "Screen ON FOD touch: UP";
-                disableHbm();
+                // Only disable HBM if auth is complete
+                if (!mAuthInProgress.load()) {
+                    disableHbm();
+                } else {
+                    LOG(INFO) << "Auth still in progress, keeping HBM on";
+                    // Keep HBM on, will be disabled when auth completes
+                }
                 mFodActive = false;
                 mIsFingerDown = false;
                 mHbmLocked = false;
+                mAuthInProgress = false;
                 
                 // Send touch command
                 {
@@ -817,6 +891,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             LOG(INFO) << "Screen OFF FOD: enabling HBM first";
             enableHbm();
             mHbmLocked = true;
+            mAuthInProgress = true;
             
             // Give display driver time to actually enable HBM
             std::this_thread::sleep_for(std::chrono::milliseconds(30));
@@ -857,6 +932,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             mIsFingerDown = false;
             mProcessingTouch = false;
             mHbmLocked = false;
+            mAuthInProgress = false;
             
             // Wait for driver to settle
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -887,6 +963,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         
         // Unlock HBM first
         mHbmLocked = false;
+        mAuthInProgress = false;
         disableHbm();
         
         // 1. Disable FOD
@@ -909,6 +986,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mFodActive = false;
         mProcessingTouch = false;
         mHbmLocked = false;
+        mAuthInProgress = false;
         
         // 4. Re-enable FOD if screen is off
         if (isScreenOff() && isFpcFod) {
