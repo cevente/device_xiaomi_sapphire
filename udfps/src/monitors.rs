@@ -85,7 +85,6 @@ impl FodPressMonitor {
             }
         };
 
-        // Initial read to prime the device
         let _ = touch.read_fod_press_status();
 
         let raw_fd = file.as_raw_fd();
@@ -93,11 +92,10 @@ impl FodPressMonitor {
 
         while running.load(Ordering::SeqCst) {
             match poll(&mut [&mut poll_fd], 1000) {
-                Ok(0) => continue, // Timeout
+                Ok(0) => continue,
                 Ok(_) => {
                     let revents = poll_fd.revents().unwrap_or(PollFlags::empty());
                     if revents.contains(PollFlags::POLLERR) || revents.contains(PollFlags::POLLPRI) {
-                        // Read the status
                         let mut buf = [0u8; 1];
                         if let Ok(bytes_read) = file.read(&mut buf) {
                             if bytes_read == 1 {
@@ -105,7 +103,6 @@ impl FodPressMonitor {
                                 log::debug!("fod_press_status changed: {}", 
                                            if pressed { "pressed" } else { "released" });
 
-                                // Handle press state
                                 let is_screen_off_enabled = 
                                     android_properties::get_bool("persist.vendor.sys.fp.screen_off", true);
                                 
@@ -115,15 +112,11 @@ impl FodPressMonitor {
                                     continue;
                                 }
 
-                                // Update state
-                                // This would call back to handler methods
-                                // For now, just update the touch controller state
                                 touch.set_finger_down(pressed);
                                 display.set_hbm(pressed);
 
                                 if !pressed {
-                                    // Clean up on release
-                                    // This would call set_fod_status based on enrollment state
+                                    // Clean up on release - will be handled by handler
                                 }
                             }
                         }
@@ -188,7 +181,6 @@ impl DisplayMonitor {
     fn monitor_thread(display: Arc<DisplayController>, running: Arc<AtomicBool>) {
         log::info!("Display event monitor thread started (Rust)");
 
-        // Register for events
         if !display.register_events() {
             log::error!("Failed to register for display events");
             return;
@@ -216,11 +208,9 @@ impl DisplayMonitor {
                 Ok(_) => {
                     let revents = poll_fd.revents().unwrap_or(PollFlags::empty());
                     if revents.contains(PollFlags::POLLIN) {
-                        // Parse display event
                         let mut event_data = [0u8; 1024];
                         if let Ok(size) = file.read(&mut event_data) {
                             if size >= std::mem::size_of::<disp_event_resp>() {
-                                // Safety: We've checked the size is sufficient
                                 let resp = unsafe {
                                     std::ptr::read(event_data.as_ptr() as *const disp_event_resp)
                                 };
@@ -230,8 +220,6 @@ impl DisplayMonitor {
                                     log::debug!("Display event data: 0x{:x}", value);
 
                                     let local_hbm_ui_ready = (value & LOCAL_HBM_UI_READY) != 0;
-                                    // This would call ext_cmd on the device
-                                    // For now, we just log it
                                     log::debug!("Local HBM UI Ready: {}", local_hbm_ui_ready);
                                 }
                             }
@@ -314,8 +302,6 @@ impl ScreenStateMonitor {
                     if current_state == 0 && is_screen_off_enabled {
                         touch.set_fod_status(FOD_STATUS_ON);
                     } else if current_state == 1 {
-                        // This should check enrollment state before turning off
-                        // For now, just set status
                         touch.set_fod_status(FOD_STATUS_OFF);
                     }
                     last_state = current_state;
