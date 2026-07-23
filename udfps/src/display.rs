@@ -29,7 +29,6 @@ impl DisplayController {
         }
     }
 
-    /// Initialize display device
     pub fn init(&self) {
         let path = Path::new(DISP_FEATURE_PATH);
         let file = match File::options()
@@ -50,17 +49,15 @@ impl DisplayController {
         log::info!("Display device opened successfully");
     }
 
-    /// Close display device
     pub fn close(&self) {
         *self.fd.lock().unwrap() = None;
         log::info!("Display device closed");
     }
 
-    /// Set HBM state
     pub fn set_hbm(&self, enabled: bool) {
         let mut hbm_state = self.hbm_enabled.lock().unwrap();
         if *hbm_state == enabled {
-            return; // No change needed
+            return;
         }
 
         if let Some(fd) = self.fd.lock().unwrap().as_ref() {
@@ -89,13 +86,11 @@ impl DisplayController {
         }
     }
 
-    /// Force HBM off
     pub fn force_hbm_off(&self) {
         self.set_hbm(false);
         log::debug!("Forced HBM off");
     }
 
-    /// Register for display events
     pub fn register_events(&self) -> bool {
         if let Some(fd) = self.fd.lock().unwrap().as_ref() {
             let raw_fd = fd.as_raw_fd();
@@ -121,7 +116,6 @@ impl DisplayController {
         false
     }
 
-    /// Get current brightness
     pub fn get_brightness() -> Option<i32> {
         let path = Path::new(BRIGHTNESS_PATH);
         if let Ok(mut file) = File::open(path) {
