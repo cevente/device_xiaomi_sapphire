@@ -1,4 +1,5 @@
 // Android.bp - Pure Rust UDFPS Handler for Xiaomi SM6225
+// Fixed for compatibility with LineageOS/Android build system
 
 rust_ffi {
     name: "libudfpshandler",
@@ -14,9 +15,6 @@ rust_ffi {
     ],
     edition: "2021",
     
-    // Include directories
-    include_dirs: ["include"],
-    
     // Rust dependencies
     rustlibs: [
         "liblibc",
@@ -30,15 +28,9 @@ rust_ffi {
         "libbase",
     ],
     
-    // NDK static libraries
+    // Static libraries
     static_libs: [
         "android.hardware.biometrics.fingerprint-V4-ndk",
-    ],
-    
-    // Header dependencies for bindgen
-    header_libs: [
-        "generated_kernel_headers",
-        "//hardware/xiaomi:xiaomifingerprint_headers",
     ],
     
     // Rust compiler flags
@@ -49,24 +41,64 @@ rust_ffi {
         "-C codegen-units=1",
     ],
     
-    // Bindgen configuration
-    bindgen_flags: [
-        "--allowlist-type=ModeType",
-        "--allowlist-type=disp_.*",
-        "--allowlist-type=fingerprint_device_t",
-        "--allowlist-var=TOUCH_.*",
-        "--allowlist-var=THP_.*",
-        "--allowlist-var=MI_DISP_.*",
-        "--allowlist-var=LHBM_.*",
-        "--allowlist-var=COMMAND_.*",
-        "--allowlist-var=PARAM_.*",
-        "--allowlist-var=FOD_STATUS_.*",
-        "--allowlist-var=MAX_BUF_SIZE",
-        "--blocklist-type=.*__u(8|16|32|64)",
-        "--blocklist-type=.*__s(8|16|32|64)",
-        "-Iinclude",
+    // Include paths for headers (use cflags instead)
+    cflags: [
+        "-Idevice/xiaomi/sapphire/udfps/include",
         "-Iexternal/libcxx/include",
         "-Isystem/core/libcutils/include",
+    ],
+    
+    product_specific: true,
+    vendor_available: true,
+}
+
+// Generate bindings using a separate genrule
+genrule {
+    name: "udfps_bindings_gen",
+    tools: ["bindgen"],
+    srcs: [
+        "bindings/wrapper.h",
+        "include/xiaomi_touch.h",
+    ],
+    cmd: "$(location bindgen) $(in) -o $(out) --allowlist-type=ModeType --allowlist-type=disp_.* --allowlist-type=fingerprint_device_t --allowlist-var=TOUCH_.* --allowlist-var=THP_.* --allowlist-var=MI_DISP_.* --allowlist-var=LHBM_.* --allowlist-var=COMMAND_.* --allowlist-var=PARAM_.* --allowlist-var=FOD_STATUS_.* --allowlist-var=MAX_BUF_SIZE --blocklist-type=.*__u8 --blocklist-type=.*__u16 --blocklist-type=.*__u32 --blocklist-type=.*__u64 --blocklist-type=.*__s8 --blocklist-type=.*__s16 --blocklist-type=.*__s32 --blocklist-type=.*__s64 -Idevice/xiaomi/sapphire/udfps/include -Iexternal/libcxx/include -Isystem/core/libcutils/include",
+    out: ["bindings.rs"],
+}
+
+// Then use the generated bindings in the main module
+rust_ffi {
+    name: "libudfpshandler",
+    vendor: true,
+    crate_name: "udfps_handler",
+    srcs: [
+        "src/lib.rs",
+        "src/handler.rs",
+        "src/touch.rs",
+        "src/display.rs",
+        "src/monitors.rs",
+        ":udfps_bindings_gen",  // Use generated bindings
+    ],
+    edition: "2021",
+    
+    rustlibs: [
+        "liblibc",
+        "libnix",
+    ],
+    
+    shared_libs: [
+        "liblog",
+        "libcutils",
+        "libbase",
+    ],
+    
+    static_libs: [
+        "android.hardware.biometrics.fingerprint-V4-ndk",
+    ],
+    
+    rust_flags: [
+        "-C opt-level=3",
+        "-C lto=true",
+        "-C panic=abort",
+        "-C codegen-units=1",
     ],
     
     product_specific: true,
