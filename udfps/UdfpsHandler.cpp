@@ -91,7 +91,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
   public:
     XiaomiSm6225UdfpsHandler() : mDevice(nullptr), isFpcFod(false), mPendingCleanup(false), 
                                   mHbmStuck(false), mAuthInProgress(false), mIsScreenOnFod(false),
-                                  mSamplesRemaining(0) {}
+                                  mSamplesRemaining(0), mIsFinalEnrollment(false) {}
 
     ~XiaomiSm6225UdfpsHandler() {
         LOG(INFO) << "Destructor called, shutting down threads";
@@ -136,6 +136,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         // Clear HBM stuck flag on new touch
         mHbmStuck = false;
         mAuthInProgress = true;
+        mIsFinalEnrollment = false;
         
         mFbDownTimeMs.store(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -154,17 +155,18 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         if (mPendingCleanup.load()) {
             LOG(INFO) << "💡 Final enrollment deferred cleanup completed via pointer UP";
             enrolling.store(false);
+            mIsFinalEnrollment = false;
             mSamplesRemaining = 0;
             mPendingCleanup = false;
             mHbmStuck = false;
+            // Clean up now that finger is physically up
             setFingerDown(false);
-            if (!enrolling.load()) {
-                setFodStatus(FOD_STATUS_OFF);
-            }
+            setFodStatus(FOD_STATUS_OFF);
             return;
         }
         
         // Normal finger up handling
+        mIsFinalEnrollment = false;
         mAuthInProgress = false;
         mIsScreenOnFod = false;
         setFingerDown(false);
@@ -182,11 +184,18 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         if (static_cast<AcquiredInfo>(result) == AcquiredInfo::GOOD) {
             LOG(INFO) << "✅ Acquisition GOOD";
             
-            // CRITICAL: Only defer cleanup for the FINAL enrollment scan
-            // We know it's final because samples_remaining == 0
+            // ⚠️ CRITICAL: If we're already in deferred cleanup mode, do NOTHING
+            // This prevents the final onAcquired(GOOD) from cleaning up prematurely
+            if (mPendingCleanup.load()) {
+                LOG(INFO) << "⏳ Deferred cleanup already pending - ignoring GOOD acquisition";
+                return;
+            }
+            
+            // Only defer cleanup for the FINAL enrollment scan
             if (enrolling.load() && mIsFingerDown.load() && mSamplesRemaining == 0) {
                 LOG(INFO) << "📝 FINAL enrollment success with finger still down - deferring cleanup";
                 mPendingCleanup = true;
+                mIsFinalEnrollment = true;
                 // Keep HBM alive until finger lifts
                 enableHbm();
                 return;
@@ -198,6 +207,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             setFingerDown(false);
             mPendingCleanup = false;
             mHbmStuck = false;
+            mIsFinalEnrollment = false;
             
             // Force HBM off immediately on success
             forceHbmCleanup();
@@ -216,11 +226,16 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         
         // Detect if HBM is being killed while finger is still down
         if (vendorCode == 23 && mIsFingerDown) {
-            LOG(INFO) << "⚠️ HBM killed while finger is still down - re-enabling";
-            mHbmStuck = true;
-            // Re-enable HBM immediately
-            enableHbm();
-            scheduleHbmCleanup();
+            // Don't re-enable HBM if we're in deferred cleanup mode
+            if (!mPendingCleanup.load()) {
+                LOG(INFO) << "⚠️ HBM killed while finger is still down - re-enabling";
+                mHbmStuck = true;
+                // Re-enable HBM immediately
+                enableHbm();
+                scheduleHbmCleanup();
+            } else {
+                LOG(INFO) << "⏳ Deferred cleanup pending - ignoring HBM kill event";
+            }
         }
     }
 
@@ -243,6 +258,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             if (mIsFingerDown.load()) {
                 LOG(INFO) << "Finger is still down - will defer cleanup";
                 mPendingCleanup = true;
+                mIsFinalEnrollment = true;
                 // Keep HBM on until finger lifts
                 enableHbm();
             }
@@ -260,6 +276,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mIsScreenOnFod = false;
         mPendingCleanup = false;
         mSamplesRemaining = 0;
+        mIsFinalEnrollment = false;
         forceCleanupIfPressed();
     }
 
@@ -268,6 +285,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mPendingCleanup = false;
         mHbmStuck = false;
         mSamplesRemaining = 0;
+        mIsFinalEnrollment = false;
         enrolling.store(true);
     }
 
@@ -275,6 +293,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << __func__;
         enrolling.store(true);
         mSamplesRemaining = 0;
+        mIsFinalEnrollment = false;
     }
 
     void postEnroll() {
@@ -297,6 +316,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::atomic<bool> mAuthInProgress{false};
     std::atomic<bool> mIsScreenOnFod{false};
     std::atomic<int32_t> mSamplesRemaining{0};  // Track remaining enrollment scans
+    std::atomic<bool> mIsFinalEnrollment{false};
     
     bool isFpcFod;
     
@@ -381,6 +401,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mAuthInProgress = false;
         mIsScreenOnFod = false;
         mSamplesRemaining = 0;
+        mIsFinalEnrollment = false;
         
         // 4. Force FOD status off
         if (!enrolling.load()) {
@@ -399,6 +420,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             // If not set yet, set it now as a safety net
             if (!mPendingCleanup.load()) {
                 mPendingCleanup = true;
+                mIsFinalEnrollment = true;
             }
             
             std::lock_guard<std::mutex> lock(cleanup_mutex_);
@@ -410,6 +432,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 if (mPendingCleanup.load()) {
                     LOG(INFO) << "⚠️ Finger still held after 3 seconds, forcing cleanup";
                     enrolling.store(false);
+                    mIsFinalEnrollment = false;
                     forceHbmCleanup();
                     mPendingCleanup = false;
                     mHbmStuck = false;
@@ -420,6 +443,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         } else {
             // Finger is already off the glass – safe to shut down immediately.
             enrolling.store(false);
+            mIsFinalEnrollment = false;
             mSamplesRemaining = 0;
             setFingerDown(false);
             mPendingCleanup = false;
@@ -540,13 +564,12 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 if (mPendingCleanup.load()) {
                     LOG(INFO) << "✅ Completing deferred enrollment cleanup on screen-off lift";
                     enrolling.store(false);
+                    mIsFinalEnrollment = false;
                     mPendingCleanup = false;
                     mHbmStuck = false;
                     mSamplesRemaining = 0;
                     setFingerDown(false);
-                    if (!enrolling.load()) {
-                        setFodStatus(FOD_STATUS_OFF);
-                    }
+                    setFodStatus(FOD_STATUS_OFF);
                 } else {
                     // Normal finger up handling.
                     setFingerDown(false);
@@ -706,6 +729,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         if (!pressed) {
             mAuthInProgress = false;
             mIsScreenOnFod = false;
+            mIsFinalEnrollment = false;
             // Ensure HBM is off on finger up
             forceHbmCleanup();
         }
