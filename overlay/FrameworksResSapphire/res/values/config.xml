@@ -5,7 +5,7 @@
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
 
-    <integer name="config_udfps_illumination_transition_ms">50</integer>
+    <!-- ==================== DIMENS ==================== -->
 
     <!-- Minimum screen brightness setting allowed by power manager.
          -2 is invalid so setting will resort to int value specified above.
@@ -27,172 +27,249 @@
     <!-- Screen brightness used to dim the screen when the user activity
          timeout expires.  May be less than the minimum allowed brightness setting
          that can be set by the user. -->
-    <integer name="config_screenBrightnessDim">13</integer>
     <item name="config_screenBrightnessDimFloat" type="dimen">0.00342131</item>
 
-    <!-- Array of light sensor lux values to define our levels for auto backlight brightness support.
-         The N entries of this array define N + 1 control points as follows:
-         (1-based arrays)
+    <dimen name="rounded_corner_content_padding">47.0px</dimen>
+    <dimen name="rounded_corner_radius_bottom">75.0px</dimen>
+    <dimen name="rounded_corner_radius_top">75.0px</dimen>
+    <dimen name="status_bar_height_default">98.0px</dimen>
+    <dimen name="status_bar_height_portrait">98.0px</dimen>
 
-         Point 1:            (0, value[1]):             lux <= 0
-         Point 2:     (level[1], value[2]):  0        < lux <= level[1]
-         Point 3:     (level[2], value[3]):  level[2] < lux <= level[3]
-         ...
-         Point N+1: (level[N], value[N+1]):  level[N] < lux
+    <!-- ==================== BOOLS ==================== -->
 
-         The control points must be strictly increasing.  Each control point
-         corresponds to an entry in the brightness backlight values arrays.
-         For example, if lux == level[1] (first element of the levels array)
-         then the brightness will be determined by value[2] (second element
-         of the brightness values array).
+    <!-- Whether to animate screen lights -->
+    <bool name="config_animateScreenLights">true</bool>
 
-         Spline interpolation is used to determine the auto-brightness
-         backlight values for lux levels between these control points.
+    <!-- Whether to avoid GPU acceleration -->
+    <bool name="config_avoidGfxAccel">false</bool>
 
-         Must be overridden in platform specific overlays -->
-    <integer-array name="config_autoBrightnessLevels">
-        <item>1</item>
-        <item>2</item>
-        <item>3</item>
+    <!-- Whether device has wakeup proximity sensor -->
+    <bool name="config_deviceHaveWakeupProximity">true</bool>
+
+    <!-- Whether Always On Display is available -->
+    <bool name="config_dozeAlwaysOnDisplayAvailable">true</bool>
+
+    <!-- Whether doze pickup gesture is enabled -->
+    <bool name="config_dozePickupGestureEnabled">true</bool>
+
+    <!-- Whether doze pulse on pickup is enabled -->
+    <bool name="config_dozePulsePickup">true</bool>
+
+    <!-- Whether doze pulse on proximity is enabled -->
+    <bool name="config_dozePulseProximity">true</bool>
+
+    <!-- Whether doze pulse on tilt is enabled -->
+    <bool name="config_dozePulseTilt">true</bool>
+
+    <!-- Whether doze wake lock screen sensor is available -->
+    <bool name="config_dozeWakeLockScreenSensorAvailable">false</bool>
+
+    <!-- Set this to true to enable the platform's auto-power-save modes like doze and app standby -->
+    <bool name="config_enableAutoPowerModes">true</bool>
+
+    <!-- Whether to enable new auto select network UI -->
+    <bool name="config_enableNewAutoSelectNetworkUI">true</bool>
+
+    <!-- Determines whether the shell features all run on another thread -->
+    <bool name="config_enableShellMainThread">true</bool>
+
+    <!-- Whether even dimmer is enabled -->
+    <bool name="config_evenDimmerEnabled">true</bool>
+
+    <!-- Whether fingerprint wake and unlock is enabled -->
+    <bool name="config_fingerprintWakeAndUnlock">true</bool>
+
+    <!-- Whether device has turbo power charger -->
+    <bool name="config_hasTurboPowerCharger">true</bool>
+
+    <!-- Whether to ignore RSSNR signal level -->
+    <bool name="config_ignoreRssnrSignalLevel">true</bool>
+
+    <!-- Whether pocket mode light sensor is supported -->
+    <bool name="config_pocketModeLightSensorSupported">true</bool>
+
+    <!-- Whether pocket mode is supported -->
+    <bool name="config_pocketModeSupported">true</bool>
+
+    <!-- Whether pocket mode uses light sensor -->
+    <bool name="config_pocketUseLightSensor">true</bool>
+
+    <!-- Whether proximity check on FPS unlock is enabled -->
+    <bool name="config_proximityCheckOnFpsUnlock">true</bool>
+
+    <!-- Whether proximity check on wake is enabled -->
+    <bool name="config_proximityCheckOnWake">true</bool>
+
+    <!-- Whether proximity check on wake is enabled by default -->
+    <bool name="config_proximityCheckOnWakeEnabledByDefault">false</bool>
+
+    <!-- Whether to disable safe media on volume up -->
+    <bool name="config_safe_media_disable_on_volume_up">true</bool>
+
+    <!-- Whether safe media volume is enabled -->
+    <bool name="config_safe_media_volume_enabled">true</bool>
+
+    <!-- Whether to enable fp unlock when screen turns off on udfps devices -->
+    <bool name="config_screen_off_udfps_enabled">true</bool>
+
+    <!-- Default value for fp screen off unlock toggle, it only works for the devices that support
+         fp screen off unlock-->
+    <bool name="config_screen_off_udfps_default_on">true</bool>
+
+    <!-- Flag indicating whether the surfaceflinger has limited alpha compositing functionality -->
+    <bool name="config_sf_limitedAlpha">false</bool>
+
+    <!-- Flag indicating whether the surface flinger is inefficient at performing a blur -->
+    <bool name="config_sf_slowBlur">true</bool>
+
+    <!-- Whether Smart Pixels are supported -->
+    <bool name="config_supportSmartPixels">true</bool>
+
+    <!-- Whether sustained performance mode is supported -->
+    <bool name="config_sustainedPerformanceModeSupported">true</bool>
+
+    <!-- Whether system captions service calls are enabled -->
+    <bool name="config_systemCaptionsServiceCallsEnabled">true</bool>
+
+    <!-- Whether wifi background scan is supported -->
+    <bool name="config_wifi_background_scan_support">true</bool>
+
+    <!-- Whether wifi batched scan is supported -->
+    <bool name="config_wifi_batched_scan_supported">true</bool>
+
+    <!-- Whether wifi connected MAC randomization is supported -->
+    <bool name="config_wifi_connected_mac_randomization_supported">true</bool>
+
+    <!-- Whether wifi dual band is supported -->
+    <bool name="config_wifi_dual_band_support">true</bool>
+
+    <!-- Whether wifi dual SAP mode is enabled -->
+    <bool name="config_wifi_dual_sap_mode_enabled">true</bool>
+
+    <!-- Whether wifi P2P MAC randomization is supported -->
+    <bool name="config_wifi_p2p_mac_randomization_supported">true</bool>
+
+    <!-- Whether wifi softap ACS is supported -->
+    <bool name="config_wifi_softap_acs_supported">true</bool>
+
+    <!-- Whether wifi softap IEEE80211ac is supported -->
+    <bool name="config_wifi_softap_ieee80211ac_supported">true</bool>
+
+    <!-- Whether doze proximity sensor is supported -->
+    <bool name="doze_proximity_sensor_supported">true</bool>
+
+    <!-- Enables or disables haptic effect when the text insertion/selection handle is moved -->
+    <bool name="config_enableHapticTextHandle">true</bool>
+
+    <!-- Boolean indicating if restoring network selection should be skipped -->
+    <!-- The restoring is handled by modem if it is true-->
+    <bool name="skip_restoring_network_selection">true</bool>
+
+    <!-- ==================== INTEGERS ==================== -->
+
+    <!-- AOD max refresh rate -->
+    <integer name="config_aodMaxRefreshRate">30</integer>
+
+    <!-- Audio notification volume default -->
+    <integer name="config_audio_notif_vol_default">10</integer>
+
+    <!-- Audio notification volume steps -->
+    <integer name="config_audio_notif_vol_steps">15</integer>
+
+    <!-- Auto brightness brightening light debounce time in ms -->
+    <integer name="config_autoBrightnessBrighteningLightDebounce">1000</integer>
+
+    <!-- Auto brightness darkening light debounce time in ms -->
+    <integer name="config_autoBrightnessDarkeningLightDebounce">1000</integer>
+
+    <!-- Brightness ramp rate fast -->
+    <integer name="config_brightness_ramp_rate_fast">2466</integer>
+
+    <!-- Brightness ramp rate slow -->
+    <integer name="config_brightness_ramp_rate_slow">1973</integer>
+
+    <!-- Default peak refresh rate -->
+    <integer name="config_defaultPeakRefreshRate">120</integer>
+
+    <!-- Default refresh rate for a given device -->
+    <integer name="config_defaultRefreshRate">0</integer>
+
+    <!-- Keyguard max refresh rate -->
+    <integer name="config_keyguardMaxRefreshRate">60</integer>
+
+    <!-- Keyguard refresh rate -->
+    <integer name="config_keyguardRefreshRate">60</integer>
+
+    <!-- Number of physical slots -->
+    <integer name="config_num_physical_slots">2</integer>
+
+    <!-- Safe media volume index -->
+    <integer name="config_safe_media_volume_index">10</integer>
+
+    <!-- Screen brightness dark value -->
+    <integer name="config_screenBrightnessDark">1</integer>
+
+    <!-- Screen brightness dim value -->
+    <integer name="config_screenBrightnessDim">13</integer>
+
+    <!-- Screen recorder max framerate -->
+    <integer name="config_screenRecorderMaxFramerate">60</integer>
+
+    <!-- UDFPS illumination transition time in ms -->
+    <integer name="config_udfps_illumination_transition_ms">50</integer>
+
+    <!-- ==================== STRINGS ==================== -->
+
+    <!-- Type of the udfps long press sensor. Empty if long press is not supported. -->
+    <string name="config_dozeUdfpsLongPressSensorType" translatable="false">org.lineageos.sensor.udfps</string>
+
+    <!-- The bounding path of the cutout region of the main built-in display -->
+    <string name="config_mainBuiltInDisplayCutout">M 0,0 H -28 V 94 H 28 V 0 H 0 Z</string>
+
+    <!-- Main display shape -->
+    <string name="config_mainDisplayShape">M20 0h1040s20 0 20 20v2360s0 20 -20 20h-1040s-20 0 -20 -20v-2360s0 -20 20 -20</string>
+
+    <!-- OEM fast charger status value -->
+    <string name="config_oemFastChargerStatusValue">1</string>
+
+    <!-- ==================== INTEGER ARRAYS ==================== -->
+
+    <!-- Ambient brightening thresholds -->
+    <integer-array name="config_ambientBrighteningThresholds">
         <item>4</item>
         <item>5</item>
-        <item>6</item>
-        <item>7</item>
-        <item>8</item>
-        <item>9</item>
         <item>10</item>
-        <item>11</item>
-        <item>12</item>
-        <item>13</item>
-        <item>14</item>
-        <item>15</item>
-        <item>16</item>
-        <item>17</item>
-        <item>18</item>
-        <item>19</item>
-        <item>20</item>
-        <item>21</item>
-        <item>22</item>
-        <item>23</item>
-        <item>24</item>
-        <item>25</item>
-        <item>26</item>
-        <item>27</item>
-        <item>28</item>
-        <item>29</item>
         <item>30</item>
-        <item>35</item>
-        <item>40</item>
-        <item>45</item>
-        <item>50</item>
-        <item>55</item>
-        <item>60</item>
-        <item>65</item>
-        <item>70</item>
-        <item>75</item>
-        <item>80</item>
-        <item>85</item>
-        <item>90</item>
-        <item>95</item>
         <item>100</item>
-        <item>120</item>
-        <item>140</item>
-        <item>160</item>
-        <item>180</item>
-        <item>200</item>
-        <item>220</item>
-        <item>240</item>
-        <item>260</item>
-        <item>280</item>
-        <item>300</item>
-        <item>320</item>
-        <item>340</item>
-        <item>360</item>
-        <item>380</item>
         <item>400</item>
-        <item>420</item>
-        <item>440</item>
-        <item>460</item>
-        <item>480</item>
-        <item>500</item>
         <item>600</item>
-        <item>700</item>
-        <item>900</item>
-        <item>1100</item>
-        <item>1300</item>
-        <item>1500</item>
-        <item>1700</item>
-        <item>1900</item>
-        <item>2000</item>
-        <item>2500</item>
-        <item>3000</item>
-        <item>3500</item>
-        <item>4000</item>
-        <item>4500</item>
-        <item>5000</item>
-        <item>5500</item>
-        <item>6000</item>
-        <item>6500</item>
-        <item>7000</item>
-        <item>7500</item>
-        <item>8000</item>
-        <item>8500</item>
-        <item>9000</item>
-        <item>9500</item>
-        <item>10000</item>
-        <item>10500</item>
-        <item>11000</item>
-        <item>11500</item>
-        <item>12000</item>
-        <item>12500</item>
-        <item>13000</item>
-        <item>13500</item>
-        <item>14000</item>
-        <item>14500</item>
-        <item>15000</item>
-        <item>16000</item>
-        <item>17000</item>
-        <item>18000</item>
-        <item>19000</item>
-        <item>20000</item>
-        <item>21000</item>
-        <item>22000</item>
-        <item>23000</item>
-        <item>24000</item>
-        <item>25000</item>
-        <item>26000</item>
-        <item>27000</item>
-        <item>28000</item>
-        <item>29000</item>
-        <item>30000</item>
-        <item>35000</item>
-        <item>40000</item>
-        <item>45000</item>
-        <item>50000</item>
-        <item>55000</item>
-        <item>60000</item>
-        <item>65000</item>
-        <item>70000</item>
-        <item>75000</item>
-        <item>80000</item>
-        <item>85000</item>
-        <item>90000</item>
-        <item>95000</item>
-        <item>100000</item>
+        <item>1000</item>
     </integer-array>
 
-    <!-- Array of desired screen brightness in nits corresponding to the lux values
-         in the config_autoBrightnessLevels array. The display brightness is defined as the measured
-         brightness of an all-white image.
+    <!-- Ambient darkening thresholds -->
+    <integer-array name="config_ambientDarkeningThresholds">
+        <item>800</item>
+        <item>800</item>
+        <item>500</item>
+        <item>500</item>
+        <item>500</item>
+        <item>500</item>
+        <item>500</item>
+        <item>500</item>
+    </integer-array>
 
-         If this is defined then:
-            - config_autoBrightnessLcdBacklightValues should not be defined
-            - config_screenBrightnessNits must be defined
-            - config_screenBrightnessBacklight must be defined
+    <!-- Ambient threshold levels -->
+    <integer-array name="config_ambientThresholdLevels">
+        <item>2</item>
+        <item>10</item>
+        <item>30</item>
+        <item>100</item>
+        <item>800</item>
+        <item>2000</item>
+        <item>4000</item>
+    </integer-array>
 
-         This array should have size one greater than the size of the config_autoBrightnessLevels
-         array. The brightness values must be non-negative and non-decreasing. This must be
-         overridden in platform specific overlays -->
+    <!-- Auto brightness display values in nits -->
     <array name="config_autoBrightnessDisplayValuesNits">
         <item>3.5</item>
         <item>7.7</item>
@@ -325,41 +402,7 @@
         <item>1200.0</item>
     </array>
 
-    <!-- An array describing the screen's backlight values corresponding to the brightness
-         values in the config_screenBrightnessNits array.
-
-         This array should be equal in size to config_screenBrightnessBacklight. -->
-    <integer-array name="config_screenBrightnessBacklight">
-        <item>1</item>
-        <item>255</item>
-    </integer-array>
-
-    <!-- An array of floats describing the screen brightness in nits corresponding to the backlight
-         values in the config_screenBrightnessBacklight array.  On OLED displays these  values
-         should be measured with an all white image while the display is in the fully on state.
-         Note that this value should *not* reflect the maximum brightness value for any high
-         brightness modes but only the maximum brightness value obtainable in a sustainable manner.
-
-         This array should be equal in size to config_screenBrightnessBacklight -->
-    <array name="config_screenBrightnessNits">
-        <item>4.3</item>
-        <item>1000.0</item>
-    </array>
-
-    <!-- The nominal white coordinates, in CIE1931 XYZ color space, for Display White Balance to
-         use in its calculations. AWB will adapt this white point to the target ambient white
-         point. The array must include a total of 3 float values (X, Y, Z) -->
-    <string-array name="config_displayWhiteBalanceDisplayNominalWhite">
-        <!-- Nominal White X --> <item>0.950456</item>
-        <!-- Nominal White Y --> <item>1.0     </item>
-        <!-- Nominal White Z --> <item>1.089058</item>
-    </string-array>
-    
-    <!-- Array of output values for LCD backlight corresponding to the lux values
-         in the config_autoBrightnessLevels array.  This array should have size one greater
-         than the size of the config_autoBrightnessLevels array.
-         The brightness values must be between 0 and 255 and be non-decreasing.
-         This must be overridden in platform specific overlays -->
+    <!-- Auto brightness LCD backlight values -->
     <integer-array name="config_autoBrightnessLcdBacklightValues">
         <item>10</item>
         <item>20</item>
@@ -371,118 +414,231 @@
         <item>255</item>
     </integer-array>
 
-    <!-- Array of ambient lux threshold values. This is used for determining hysteresis constraint
-         values by calculating the index to use for lookup and then setting the constraint value
-         to the corresponding value of the array. The new brightening hysteresis constraint value
-         is the n-th element of config_ambientBrighteningThresholds, and the new darkening
-         hysteresis constraint value is the n-th element of config_ambientDarkeningThresholds.
-         The (zero-based) index is calculated as follows: (MAX is the largest index of the array)
-         condition                       calculated index
-         value < level[0]                0
-         level[n] <= value < level[n+1]  n+1
-         level[MAX] <= value             MAX+1 -->
-    <integer-array name="config_ambientThresholdLevels">
+    <!-- Auto brightness levels -->
+    <integer-array name="config_autoBrightnessLevels">
+        <item>1</item>
         <item>2</item>
-        <item>10</item>
-        <item>30</item>
-        <item>100</item>
-        <item>800</item>
-        <item>2000</item>
-        <item>4000</item>
-    </integer-array>
-
-    <!-- Array of hysteresis constraint values for brightening, represented as tenths of a
-         percent. The length of this array is assumed to be one greater than
-         config_ambientThresholdLevels. The brightening threshold is calculated as
-         lux * (1.0f + CONSTRAINT_VALUE). When the current lux is higher than this threshold,
-         the screen brightness is recalculated. See the config_ambientThresholdLevels
-         description for how the constraint value is chosen. -->
-    <integer-array name="config_ambientBrighteningThresholds">
+        <item>3</item>
         <item>4</item>
         <item>5</item>
+        <item>6</item>
+        <item>7</item>
+        <item>8</item>
+        <item>9</item>
         <item>10</item>
+        <item>11</item>
+        <item>12</item>
+        <item>13</item>
+        <item>14</item>
+        <item>15</item>
+        <item>16</item>
+        <item>17</item>
+        <item>18</item>
+        <item>19</item>
+        <item>20</item>
+        <item>21</item>
+        <item>22</item>
+        <item>23</item>
+        <item>24</item>
+        <item>25</item>
+        <item>26</item>
+        <item>27</item>
+        <item>28</item>
+        <item>29</item>
         <item>30</item>
+        <item>35</item>
+        <item>40</item>
+        <item>45</item>
+        <item>50</item>
+        <item>55</item>
+        <item>60</item>
+        <item>65</item>
+        <item>70</item>
+        <item>75</item>
+        <item>80</item>
+        <item>85</item>
+        <item>90</item>
+        <item>95</item>
         <item>100</item>
+        <item>120</item>
+        <item>140</item>
+        <item>160</item>
+        <item>180</item>
+        <item>200</item>
+        <item>220</item>
+        <item>240</item>
+        <item>260</item>
+        <item>280</item>
+        <item>300</item>
+        <item>320</item>
+        <item>340</item>
+        <item>360</item>
+        <item>380</item>
         <item>400</item>
+        <item>420</item>
+        <item>440</item>
+        <item>460</item>
+        <item>480</item>
+        <item>500</item>
         <item>600</item>
-        <item>1000</item>
+        <item>700</item>
+        <item>900</item>
+        <item>1100</item>
+        <item>1300</item>
+        <item>1500</item>
+        <item>1700</item>
+        <item>1900</item>
+        <item>2000</item>
+        <item>2500</item>
+        <item>3000</item>
+        <item>3500</item>
+        <item>4000</item>
+        <item>4500</item>
+        <item>5000</item>
+        <item>5500</item>
+        <item>6000</item>
+        <item>6500</item>
+        <item>7000</item>
+        <item>7500</item>
+        <item>8000</item>
+        <item>8500</item>
+        <item>9000</item>
+        <item>9500</item>
+        <item>10000</item>
+        <item>10500</item>
+        <item>11000</item>
+        <item>11500</item>
+        <item>12000</item>
+        <item>12500</item>
+        <item>13000</item>
+        <item>13500</item>
+        <item>14000</item>
+        <item>14500</item>
+        <item>15000</item>
+        <item>16000</item>
+        <item>17000</item>
+        <item>18000</item>
+        <item>19000</item>
+        <item>20000</item>
+        <item>21000</item>
+        <item>22000</item>
+        <item>23000</item>
+        <item>24000</item>
+        <item>25000</item>
+        <item>26000</item>
+        <item>27000</item>
+        <item>28000</item>
+        <item>29000</item>
+        <item>30000</item>
+        <item>35000</item>
+        <item>40000</item>
+        <item>45000</item>
+        <item>50000</item>
+        <item>55000</item>
+        <item>60000</item>
+        <item>65000</item>
+        <item>70000</item>
+        <item>75000</item>
+        <item>80000</item>
+        <item>85000</item>
+        <item>90000</item>
+        <item>95000</item>
+        <item>100000</item>
     </integer-array>
 
-    <!-- Array of hysteresis constraint values for darkening, represented as tenths of a
-         percent. The length of this array is assumed to be one greater than
-         config_ambientThresholdLevels. The darkening threshold is calculated as
-         lux * (1.0f - CONSTRAINT_VALUE). When the current lux is lower than this threshold,
-         the screen brightness is recalculated. See the config_ambientThresholdLevels
-         description for how the constraint value is chosen. -->
-    <integer-array name="config_ambientDarkeningThresholds">
-        <item>800</item>
-        <item>800</item>
-        <item>500</item>
-        <item>500</item>
-        <item>500</item>
-        <item>500</item>
-        <item>500</item>
-        <item>500</item>
+    <!-- Long press vibe pattern -->
+    <integer-array name="config_longPressVibePattern">
+        <item>0</item>
+        <item>1</item>
+        <item>75</item>
+        <item>76</item>
     </integer-array>
 
-    <!-- The bounding path of the cutout region of the main built-in display.
-         Must either be empty if there is no cutout region, or a string that is parsable by
-         {@link android.util.PathParser}.
+    <!-- Screen brightening thresholds -->
+    <integer-array name="config_screenBrighteningThresholds">
+        <item>0</item>
+    </integer-array>
 
-         The path is assumed to be specified in display coordinates with pixel units and in
-         the display's native orientation, with the origin of the coordinate system at the
-         center top of the display. Optionally, you can append either `@left` or `@right` to the
-         end of the path string, in order to change the path origin to either the top left,
-         or top right of the display.
+    <!-- Screen brightness backlight values -->
+    <integer-array name="config_screenBrightnessBacklight">
+        <item>1</item>
+        <item>255</item>
+    </integer-array>
 
-         To facilitate writing device-independent emulation overlays, the marker `@dp` can be
-         appended after the path string to interpret coordinates in dp instead of px units.
-         Note that a physical cutout should be configured in pixels for the best results.
+    <!-- Screen brightness in nits -->
+    <array name="config_screenBrightnessNits">
+        <item>4.3</item>
+        <item>1000.0</item>
+    </array>
 
-         If the display supports multiple resolutions, please define the path config based on the
-         highest resolution so that it can be scaled correctly in each resolution.
+    <!-- Screen darkening thresholds -->
+    <integer-array name="config_screenDarkeningThresholds">
+        <item>0</item>
+    </integer-array>
 
-         Example for a 10px x 10px square top-center cutout:
-                <string ...>M -5,0 L -5,10 L 5,10 L 5,0 Z</string>
-         Example for a 10dp x 10dp square top-center cutout:
-                <string ...>M -5,0 L -5,10 L 5,10 L 5,0 Z @dp</string>
+    <!-- Screen threshold levels -->
+    <array name="config_screenThresholdLevels" />
 
-         @see https://www.w3.org/TR/SVG/paths.html#PathData
-         -->
-    <string name="config_mainBuiltInDisplayCutout">M 0,0 H -28 V 94 H 28 V 0 H 0 Z</string>
+    <!-- Virtual key vibe pattern -->
+    <integer-array name="config_virtualKeyVibePattern">
+        <item>0</item>
+        <item>30</item>
+        <item>45</item>
+        <item>53</item>
+    </integer-array>
 
-    <!-- The default refresh rate for a given device. Change this value to set a higher default
-         refresh rate. If the hardware composer on the device supports display modes with a higher
-         refresh rate than the default value specified here, the framework may use those higher
-         refresh rate modes if an app chooses one by setting preferredDisplayModeId or calling
-         setFrameRate().
-         If a non-zero value is set for config_defaultPeakRefreshRate, then
-         config_defaultRefreshRate may be set to 0, in which case the value set for
-         config_defaultPeakRefreshRate will act as the default frame rate. -->
-    <integer name="config_defaultRefreshRate">0</integer>
+    <!-- Correct brightness for video -->
+    <array name="correct_brightness_video">
+        <item>0.02</item>
+        <item>0.02</item>
+        <item>0.02</item>
+        <item>0.0582</item>
+        <item>0.0679</item>
+        <item>0.0838</item>
+        <item>0.0977</item>
+        <item>0.1075</item>
+        <item>0.1075</item>
+    </array>
 
-    <!-- The default peak refresh rate for a given device. Change this value if you want to prevent
-         the framework from using higher refresh rates, even if display modes with higher refresh
-         rates are available from hardware composer. Only has an effect if the value is
-         non-zero. -->
-    <integer name="config_defaultPeakRefreshRate">120</integer>
+    <!-- ==================== STRING ARRAYS ==================== -->
 
-    <!-- Type of the udfps long press sensor. Empty if long press is not supported. -->
-    <string name="config_dozeUdfpsLongPressSensorType" translatable="false">org.lineageos.sensor.udfps</string>
-    
-    <!-- Whether to enable fp unlock when screen turns off on udfps devices -->
-    <bool name="config_screen_off_udfps_enabled">true</bool>
+    <!-- Disallowed apps in managed profile -->
+    <string-array name="disallowed_apps_managed_profile">
+        <item>com.miui.mishare.connectivity</item>
+    </string-array>
 
-    <!-- Default value for fp screen off unlock toggle, it only works for the devices that support
-         fp screen off unlock-->
-	<bool name="config_screen_off_udfps_default_on">true</bool>
-    
-    <!-- Enables or disables haptic effect when the text insertion/selection handle is moved
-         manually by the user. Off by default, since the expected haptic feedback may not be
-         available on some devices. -->
-    <bool name="config_enableHapticTextHandle">true</bool>
+    <!-- Required apps for managed device -->
+    <string-array name="required_apps_managed_device">
+        <item>com.android.settings</item>
+        <item>com.android.contacts</item>
+        <item>com.android.dialer</item>
+        <item>com.android.stk</item>
+        <item>com.android.providers.downloads</item>
+        <item>com.android.providers.downloads.ui</item>
+        <item>com.android.documentsui</item>
+    </string-array>
 
-    <!-- Boolean indicating if restoring network selection should be skipped -->
-    <!-- The restoring is handled by modem if it is true-->
-    <bool name="skip_restoring_network_selection">true</bool>
+    <!-- Vendor required apps for managed device -->
+    <string-array name="vendor_required_apps_managed_device">
+        <item>com.android.vending</item>
+        <item>com.google.android.gms</item>
+        <item>com.android.documentsui</item>
+        <item>com.android.contacts</item>
+        <item>com.android.launcher</item>
+    </string-array>
+
+    <!-- Vendor required apps for managed profile -->
+    <string-array name="vendor_required_apps_managed_profile">
+        <item>com.android.vending</item>
+        <item>com.google.android.gms</item>
+        <item>com.android.documentsui</item>
+    </string-array>
+
+    <!-- The nominal white coordinates, in CIE1931 XYZ color space, for Display White Balance -->
+    <string-array name="config_displayWhiteBalanceDisplayNominalWhite">
+        <item>0.950456</item>
+        <item>1.0</item>
+        <item>1.089058</item>
+    </string-array>
+
 </resources>
