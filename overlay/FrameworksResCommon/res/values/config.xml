@@ -5,7 +5,6 @@
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
 
-
     <!-- An Array of "[ConnectivityManager connectionType],
                       [# simultaneous connection types]"  -->
     <string-array name="radioAttributes" translatable="false">
@@ -92,6 +91,9 @@
     <!-- If true, the doze component is not started until after the screen has been
          turned off and the screen off animation has been performed. -->
     <bool name="config_dozeAfterScreenOffByDefault">true</bool>
+
+    <!-- Whether the doze tap gesture is enabled -->
+    <bool name="config_dozeTapGestureEnabled">true</bool>
 
     <!-- Power Management: Specifies whether to decouple the interactive state of the
          device from the display on/off state.
@@ -279,7 +281,18 @@
         <item>10</item>
     </integer-array>
 
-<!-- The default intensity level for haptic feedback. See
+    <!-- Vibrator pattern for feedback about a context click -->
+    <integer-array name="config_contextClickVibePattern">
+        <item>0</item>
+        <item>80</item>
+    </integer-array>
+
+    <!-- Vibrator pattern for keyboard tap -->
+    <integer-array name="config_keyboardTapVibePattern">
+        <item>50</item>
+    </integer-array>
+
+    <!-- The default intensity level for haptic feedback. See
          Settings.System.HAPTIC_FEEDBACK_INTENSITY more details on the constant values and
          meanings. -->
     <integer name="config_defaultHapticFeedbackIntensity">3</integer>
@@ -289,10 +302,19 @@
          meanings. -->
     <integer name="config_defaultNotificationVibrationIntensity">3</integer>
 
-    <!-- The default intensity level for notification vibrations. See
+    <!-- The default intensity level for ring vibrations. See
          Settings.System.RING_VIBRATION_INTENSITY more details on the constant values and
          meanings. -->
     <integer name="config_defaultRingVibrationIntensity">3</integer>
+
+    <!-- The default intensity level for alarm vibrations -->
+    <integer name="config_defaultAlarmVibrationIntensity">3</integer>
+
+    <!-- The default intensity level for keyboard vibrations -->
+    <integer name="config_defaultKeyboardVibrationIntensity">3</integer>
+
+    <!-- The default intensity level for media vibrations -->
+    <integer name="config_defaultMediaVibrationIntensity">3</integer>
 
     <!-- Whether to select voice/data/sms preference without user confirmation -->
     <bool name="config_voice_data_sms_auto_fallback">true</bool>
@@ -377,4 +399,25 @@
          Forced true here since ro.surface_flinger.supports_background_blur=1
          is set in system_ext.prop for sapphire (Adreno 610 / SM6225). -->
     <bool name="config_enableBlurs">true</bool>
+
+    <!-- Whether haptic feedback is supported for text handles -->
+    <bool name="config_enableHapticTextHandle">true</bool>
+
+    <!-- Whether keyboard vibration settings are supported -->
+    <bool name="config_keyboardVibrationSettingsSupported">true</bool>
+
+    <!-- Whether ringtone vibration settings are supported -->
+    <bool name="config_ringtoneVibrationSettingsSupported">true</bool>
+
+    <!-- Whether to animate screen lights -->
+    <bool name="config_animateScreenLights">true</bool>
+
+    <!-- System configuration values base -->
+    <string-array name="configs_base">
+        <item>activity_manager/use_compaction=true</item>
+        <item>activity_manager/max_cached_processes=64</item>
+    </string-array>
+
+    <!-- Database default sync mode -->
+    <string name="db_default_sync_mode">NORMAL</string>
 </resources>
