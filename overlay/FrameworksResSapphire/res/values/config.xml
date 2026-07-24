@@ -62,7 +62,7 @@
     <bool name="config_dozePulseTilt">true</bool>
 
     <!-- Whether doze wake lock screen sensor is available -->
-    <bool name="config_dozeWakeLockScreenSensorAvailable">false</bool>
+    <bool name="config_dozeWakeLockScreenSensorAvailable">true</bool>
 
     <!-- Set this to true to enable the platform's auto-power-save modes like doze and app standby -->
     <bool name="config_enableAutoPowerModes">true</bool>
@@ -73,11 +73,8 @@
     <!-- Determines whether the shell features all run on another thread -->
     <bool name="config_enableShellMainThread">true</bool>
 
-    <!-- Whether even dimmer is enabled -->
-    <bool name="config_evenDimmerEnabled">true</bool>
-
     <!-- Whether fingerprint wake and unlock is enabled -->
-    <bool name="config_fingerprintWakeAndUnlock">true</bool>
+    <bool name="config_fingerprintWakeAndUnlock">false</bool>
 
     <!-- Whether device has turbo power charger -->
     <bool name="config_hasTurboPowerCharger">true</bool>
@@ -86,13 +83,13 @@
     <bool name="config_ignoreRssnrSignalLevel">true</bool>
 
     <!-- Whether pocket mode light sensor is supported -->
-    <bool name="config_pocketModeLightSensorSupported">true</bool>
+    <bool name="config_pocketModeLightSensorSupported">false</bool>
 
     <!-- Whether pocket mode is supported -->
     <bool name="config_pocketModeSupported">true</bool>
 
     <!-- Whether pocket mode uses light sensor -->
-    <bool name="config_pocketUseLightSensor">true</bool>
+    <bool name="config_pocketUseLightSensor">false</bool>
 
     <!-- Whether proximity check on FPS unlock is enabled -->
     <bool name="config_proximityCheckOnFpsUnlock">true</bool>
@@ -101,7 +98,7 @@
     <bool name="config_proximityCheckOnWake">true</bool>
 
     <!-- Whether proximity check on wake is enabled by default -->
-    <bool name="config_proximityCheckOnWakeEnabledByDefault">false</bool>
+    <bool name="config_proximityCheckOnWakeEnabledByDefault">true</bool>
 
     <!-- Whether to disable safe media on volume up -->
     <bool name="config_safe_media_disable_on_volume_up">true</bool>
@@ -126,7 +123,7 @@
     <bool name="config_supportSmartPixels">true</bool>
 
     <!-- Whether sustained performance mode is supported -->
-    <bool name="config_sustainedPerformanceModeSupported">true</bool>
+    <bool name="config_sustainedPerformanceModeSupported">false</bool>
 
     <!-- Whether system captions service calls are enabled -->
     <bool name="config_systemCaptionsServiceCallsEnabled">true</bool>
