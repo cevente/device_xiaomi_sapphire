@@ -44,7 +44,7 @@
     <bool name="config_avoidGfxAccel">false</bool>
 
     <!-- Whether device has wakeup proximity sensor -->
-    <bool name="config_deviceHaveWakeupProximity">true</bool>
+    <bool name="config_deviceHaveWakeupProximity">false</bool>
 
     <!-- Whether Always On Display is available -->
     <bool name="config_dozeAlwaysOnDisplayAvailable">true</bool>
@@ -83,13 +83,13 @@
     <bool name="config_ignoreRssnrSignalLevel">true</bool>
 
     <!-- Whether pocket mode light sensor is supported -->
-    <bool name="config_pocketModeLightSensorSupported">false</bool>
+    <bool name="config_pocketModeLightSensorSupported">true</bool>
 
     <!-- Whether pocket mode is supported -->
     <bool name="config_pocketModeSupported">true</bool>
 
     <!-- Whether pocket mode uses light sensor -->
-    <bool name="config_pocketUseLightSensor">false</bool>
+    <bool name="config_pocketUseLightSensor">true</bool>
 
     <!-- Whether proximity check on FPS unlock is enabled -->
     <bool name="config_proximityCheckOnFpsUnlock">true</bool>
@@ -153,7 +153,7 @@
     <bool name="config_wifi_softap_ieee80211ac_supported">true</bool>
 
     <!-- Whether doze proximity sensor is supported -->
-    <bool name="doze_proximity_sensor_supported">true</bool>
+    <bool name="doze_proximity_sensor_supported">false</bool>
 
     <!-- ==================== INTEGERS ==================== -->
 
@@ -206,7 +206,7 @@
     <integer name="config_screenRecorderMaxFramerate">60</integer>
 
     <!-- UDFPS illumination transition time in ms -->
-    <integer name="config_udfps_illumination_transition_ms">30</integer>
+    <integer name="config_udfps_illumination_transition_ms">24</integer>
 
     <!-- ==================== STRINGS ==================== -->
 
