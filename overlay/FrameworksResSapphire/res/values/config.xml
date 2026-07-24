@@ -56,13 +56,13 @@
     <bool name="config_dozePulsePickup">true</bool>
 
     <!-- Whether doze pulse on proximity is enabled -->
-    <bool name="config_dozePulseProximity">true</bool>
+    <bool name="config_dozePulseProximity">false</bool>
 
     <!-- Whether doze pulse on tilt is enabled -->
     <bool name="config_dozePulseTilt">true</bool>
 
     <!-- Whether doze wake lock screen sensor is available -->
-    <bool name="config_dozeWakeLockScreenSensorAvailable">true</bool>
+    <bool name="config_dozeWakeLockScreenSensorAvailable">false</bool>
 
     <!-- Set this to true to enable the platform's auto-power-save modes like doze and app standby -->
     <bool name="config_enableAutoPowerModes">true</bool>
