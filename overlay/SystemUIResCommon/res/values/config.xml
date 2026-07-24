@@ -5,6 +5,8 @@
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
 
+    <!-- ==================== STRING ARRAYS ==================== -->
+
     <!-- Tiles to auto add to Quick Settings upon first change of a given secure setting.
          The syntax is setting-name:spec. If the tile is a TileService, the spec should be specified
          as custom(package/class). Relative class name is supported. -->
@@ -14,13 +16,7 @@
         <item>focus_mode_first_time_setup:custom(com.google.android.apps.wellbeing/.focusmode.quicksettings.FocusModeTileService)</item>
     </string-array>
 
-    <!-- Doze: does this device support STATE_DOZE?  -->
-    <bool name="doze_display_state_supported">true</bool>
-
-    <!-- Type of a sensor that provides a low-power estimate of the desired display
-         brightness, suitable to listen to while the device is asleep (e.g. during
-         always-on display) -->
-    <string name="doze_brightness_sensor_type" translatable="false">xiaomi.sensor.aod</string>
+    <!-- ==================== INTEGER ARRAYS ==================== -->
 
     <!-- Doze: Table that translates sensor values from the doze_brightness_sensor_type sensor
                to brightness values; -1 means keeping the current brightness. -->
@@ -46,9 +42,29 @@
         <item>0</item>
     </integer-array>
 
+    <!-- ==================== BOOLS ==================== -->
+
+    <!-- Doze: does this device support STATE_DOZE? -->
+    <bool name="doze_display_state_supported">true</bool>
+
+    <!-- ==================== DIMENS ==================== -->
+
+    <!-- Pixel pitch (presumably in microns or similar units) -->
+    <item type="dimen" name="pixel_pitch">64.41</item>
+
+    <!-- ==================== INTEGERS ==================== -->
+
     <!-- If not zero, limits the internal screen recorder's framerate to the set value. -->
-    <integer name="config_screenRecorderMaxFramerate">120</integer>
+    <integer name="config_screenRecorderMaxFramerate">60</integer>
 
     <!-- The CPU temperature divider, if needed -->
     <integer name="config_cpuTempDivider" translatable="false">1000</integer>
+
+    <!-- ==================== STRINGS ==================== -->
+
+    <!-- Type of a sensor that provides a low-power estimate of the desired display
+         brightness, suitable to listen to while the device is asleep (e.g. during
+         always-on display) -->
+    <string name="doze_brightness_sensor_type" translatable="false">xiaomi.sensor.aod</string>
+
 </resources>
