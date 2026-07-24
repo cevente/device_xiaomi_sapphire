@@ -89,7 +89,7 @@
     <bool name="config_pocketModeSupported">true</bool>
 
     <!-- Whether pocket mode uses light sensor -->
-    <bool name="config_pocketUseLightSensor">true</bool>
+    <bool name="config_pocketUseLightSensor">false</bool>
 
     <!-- Whether proximity check on FPS unlock is enabled -->
     <bool name="config_proximityCheckOnFpsUnlock">true</bool>
@@ -714,6 +714,9 @@
     </array>
 
     <!-- ==================== STRING ARRAYS ==================== -->
+
+     <!-- Vendor specific proximity sensor name for Pocket Mode -->
+<string name="config_pocketJudgeVendorProximitySensorName" translatable="false">tmd2755 Proximity Sensor Wakeup</string>
 
     <!-- Disallowed apps in managed profile -->
     <string-array name="disallowed_apps_managed_profile">
