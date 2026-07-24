@@ -158,13 +158,6 @@
     <!-- Whether doze proximity sensor is supported -->
     <bool name="doze_proximity_sensor_supported">true</bool>
 
-    <!-- Enables or disables haptic effect when the text insertion/selection handle is moved -->
-    <bool name="config_enableHapticTextHandle">true</bool>
-
-    <!-- Boolean indicating if restoring network selection should be skipped -->
-    <!-- The restoring is handled by modem if it is true-->
-    <bool name="skip_restoring_network_selection">true</bool>
-
     <!-- ==================== INTEGERS ==================== -->
 
     <!-- AOD max refresh rate -->
@@ -210,13 +203,13 @@
     <integer name="config_screenBrightnessDark">1</integer>
 
     <!-- Screen brightness dim value -->
-    <integer name="config_screenBrightnessDim">13</integer>
+    <integer name="config_screenBrightnessDim">10</integer>
 
     <!-- Screen recorder max framerate -->
     <integer name="config_screenRecorderMaxFramerate">60</integer>
 
     <!-- UDFPS illumination transition time in ms -->
-    <integer name="config_udfps_illumination_transition_ms">50</integer>
+    <integer name="config_udfps_illumination_transition_ms">30</integer>
 
     <!-- ==================== STRINGS ==================== -->
 
@@ -404,14 +397,137 @@
 
     <!-- Auto brightness LCD backlight values -->
     <integer-array name="config_autoBrightnessLcdBacklightValues">
-        <item>10</item>
-        <item>20</item>
-        <item>40</item>
-        <item>70</item>
-        <item>110</item>
-        <item>160</item>
-        <item>200</item>
+        <item>14</item>
+        <item>31</item>
+        <item>48</item>
+        <item>66</item>
+        <item>83</item>
+        <item>100</item>
+        <item>117</item>
+        <item>126</item>
+        <item>131</item>
+        <item>137</item>
+        <item>143</item>
+        <item>150</item>
+        <item>156</item>
+        <item>164</item>
+        <item>171</item>
+        <item>179</item>
+        <item>187</item>
+        <item>196</item>
+        <item>205</item>
+        <item>214</item>
+        <item>226</item>
+        <item>234</item>
+        <item>244</item>
         <item>255</item>
+        <item>269</item>
+        <item>277</item>
+        <item>289</item>
+        <item>301</item>
+        <item>314</item>
+        <item>327</item>
+        <item>340</item>
+        <item>342</item>
+        <item>344</item>
+        <item>346</item>
+        <item>348</item>
+        <item>349</item>
+        <item>351</item>
+        <item>353</item>
+        <item>355</item>
+        <item>357</item>
+        <item>359</item>
+        <item>360</item>
+        <item>362</item>
+        <item>364</item>
+        <item>366</item>
+        <item>372</item>
+        <item>378</item>
+        <item>384</item>
+        <item>390</item>
+        <item>395</item>
+        <item>401</item>
+        <item>407</item>
+        <item>413</item>
+        <item>419</item>
+        <item>447</item>
+        <item>453</item>
+        <item>459</item>
+        <item>465</item>
+        <item>471</item>
+        <item>478</item>
+        <item>484</item>
+        <item>490</item>
+        <item>497</item>
+        <item>503</item>
+        <item>510</item>
+        <item>542</item>
+        <item>584</item>
+        <item>667</item>
+        <item>754</item>
+        <item>846</item>
+        <item>940</item>
+        <item>1036</item>
+        <item>1134</item>
+        <item>1184</item>
+        <item>1441</item>
+        <item>1711</item>
+        <item>1787</item>
+        <item>1863</item>
+        <item>1939</item>
+        <item>2015</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
+        <item>2047</item>
     </integer-array>
 
     <!-- Auto brightness levels -->
@@ -632,13 +748,6 @@
         <item>com.android.vending</item>
         <item>com.google.android.gms</item>
         <item>com.android.documentsui</item>
-    </string-array>
-
-    <!-- The nominal white coordinates, in CIE1931 XYZ color space, for Display White Balance -->
-    <string-array name="config_displayWhiteBalanceDisplayNominalWhite">
-        <item>0.950456</item>
-        <item>1.0</item>
-        <item>1.089058</item>
     </string-array>
 
 </resources>
