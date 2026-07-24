@@ -36,11 +36,21 @@ import /vendor/etc/init/hw/init.qti.kernel.rc
 import /vendor/etc/init/hw/init.xiaomi.rc
 
 on early-init
+    # KEEP THIS - Boot optimization for faster startup
     write /proc/sys/kernel/sched_boost 1
     exec u:r:vendor_qti_init_shell:s0 -- /vendor/bin/init.qti.early_init.sh
     setprop ro.soc.model ${ro.vendor.qti.soc_model}
+    # 1. Unthrottle the UFS Storage Clocks
+    write /sys/bus/platform/devices/4804000.ufshc/clkscale_enable 0
+    write /sys/bus/platform/devices/4804000.ufshc/auto_hibern8 0
+    write /sys/bus/platform/devices/4804000.ufshc/clkgate_enable 0
 
 on init
+    # KEEP THESE - Performance governors speed up boot animation
+    write /sys/devices/system/cpu/cpufreq/policy0/scaling_governor "performance"
+    write /sys/devices/system/cpu/cpufreq/policy4/scaling_governor "performance"
+    write /proc/sys/kernel/sched_boost 1
+
     write /dev/stune/foreground/schedtune.sched_boost_no_override 1
     write /dev/stune/top-app/schedtune.sched_boost_no_override 1
     write /dev/stune/schedtune.colocate 0
@@ -91,29 +101,33 @@ on post-fs-data
     # Enable suspend to RAM
     write /sys/power/mem_sleep "s2idle"
 
+    # 3. Max out Block Layer Read-Ahead
+    write /sys/block/sda/queue/read_ahead_kb 2048
+    write /sys/block/dm-0/queue/read_ahead_kb 2048
+
 # Display feature sysfs node
     chown system system /sys/class/mi_display/disp-DSI-0/disp_param
-    chmod 0664 /sys/class/mi_display/disp-DSI-0/disp_param
+    chmod 0666 /sys/class/mi_display/disp-DSI-0/disp_param
     chown system system /sys/class/mi_display/disp-DSI-0/mipi_rw
-    chmod 0664 /sys/class/mi_display/disp-DSI-0/mipi_rw
+    chmod 0666 /sys/class/mi_display/disp-DSI-0/mipi_rw
     chown system system /sys/class/mi_display/disp-DSI-0/panel_info
-    chmod 0444 /sys/class/mi_display/disp-DSI-0/panel_info
+    chmod 0666 /sys/class/mi_display/disp-DSI-0/panel_info
     chown system system /sys/class/mi_display/disp-DSI-0/wp_info
-    chmod 0444 /sys/class/mi_display/disp-DSI-0/wp_info
+    chmod 0666 /sys/class/mi_display/disp-DSI-0/wp_info
     chown system system /sys/class/mi_display/disp-DSI-0/dynamic_fps
-    chmod 0444 /sys/class/mi_display/disp-DSI-0/dynamic_fps
+    chmod 0666 /sys/class/mi_display/disp-DSI-0/dynamic_fps
     chown system system /sys/class/mi_display/disp-DSI-0/doze_brightness
-    chmod 0664 /sys/class/mi_display/disp-DSI-0/doze_brightness
+    chmod 0666 /sys/class/mi_display/disp-DSI-0/doze_brightness
     chown system system /sys/class/mi_display/disp-DSI-0/brightness_clone
-    chmod 0664 /sys/class/mi_display/disp-DSI-0/brightness_clone
+    chmod 0666 /sys/class/mi_display/disp-DSI-0/brightness_clone
     chown system system /sys/class/mi_display/disp-DSI-0/max_brightness_clone
-    chmod 0664 /sys/class/mi_display/disp-DSI-0/max_brightness_clone
+    chmod 0666 /sys/class/mi_display/disp-DSI-0/max_brightness_clone
 
     # Display feature sysfs node for penel1
     chown system system /sys/class/mi_display/disp-DSI-1/brightness_clone
-    chmod 0664 /sys/class/mi_display/disp-DSI-1/brightness_clone
+    chmod 0666 /sys/class/mi_display/disp-DSI-1/brightness_clone
     chown system system /sys/class/mi_display/disp-DSI-1/max_brightness_clone
-    chmod 0664 /sys/class/mi_display/disp-DSI-1/max_brightness_clone
+    chmod 0666 /sys/class/mi_display/disp-DSI-1/max_brightness_clone
 
 # Creat directory used for touchpanel_selftest
     mkdir /data/vendor/touchpad
@@ -213,16 +227,13 @@ on boot
     setprop vendor.usb.dpl.inst.name "dpl"
     setprop vendor.usb.qdss.inst.name "qdss_sw"
     setprop vendor.usb.controller 4e00000.dwc3
-    setprop persist.sys.offlinelog.poweroff_charger_log true
-    wait /dev/qg
-    start vendor.hvdcp_opti
 
 #Start mi_thermald
     start mi_thermald
 
 #qcom-battery input_suspend sysfs node
     chown system system /sys/class/qcom-battery/input_suspend
-    chmod 0660 /sys/class/qcom-battery/input_suspend
+    chmod 0666 /sys/class/qcom-battery/input_suspend
     restorecon /sys/class/qcom-battery/input_suspend
 
 on boot && property:persist.vendor.usb.controller.default=*
@@ -232,19 +243,18 @@ on property:vendor.usb.controller=*
     setprop sys.usb.controller ${vendor.usb.controller}
 
 on charger
+    wait /dev/block/by-name/system
+    mount erofs /dev/block/by-name/system / ro
+    wait /dev/block/by-name/persist
+    mount ext4 /dev/block/by-name/persist /mnt/vendor/persist nosuid nodev barrier=1
+    start vendor.power_off_alarm
     setprop vendor.usb.controller 4e00000.dwc3
     setprop sys.usb.configfs 1
     setprop persist.sys.offlinelog.poweroff_charger_log true
     wait /dev/qg
-    start vendor.power_off_alarm
-    start vendor.hvdcp_opti
-    exec_background - system system -- /vendor/bin/init.qti.chg_policy.sh
-    mkdir /data/vendor/charge_logger 0771 system system
-    start charger
-    class_start charger
-
-#Start mi_thermald
+    start vendor.thermal-hal
     start mi_thermald
+    start vendor.hvdcp_opti
 
 #pd-mapper
 service vendor.pd_mapper /vendor/bin/pd-mapper
@@ -334,8 +344,8 @@ service panel_color /vendor/bin/panelcolor_bin
 
 on property:sys.boot_completed=1
     start panel_color
-# add end
 
+# add end
 #add for wifi 9434 log
 service vendor.tcpdump /vendor/bin/vendor_tcpdump -i any -W 2 -C 2 -s 134 -w /data/vendor/wlan_logs/tcpdump.pcap
     class main
@@ -364,3 +374,83 @@ on property:persist.sys.cota.carrier=OR
 on property:persist.ro.ril.oem.btmac=*
   setprop ro.ril.oem.btmac ${persist.ro.ril.oem.btmac}
 
+on property:sys.boot_completed=1
+    # write /sys/devices/virtual/thermal/thermal_message/sconfig 0
+    # RESTORE UFS STORAGE POWER SAVING AFTER BOOT FINISHES
+    write /sys/bus/platform/devices/4804000.ufshc/clkscale_enable 1
+    write /sys/bus/platform/devices/4804000.ufshc/auto_hibern8 5000
+    write /sys/bus/platform/devices/4804000.ufshc/clkgate_enable 1
+
+# ============================================================
+# BOOT-OPTIMIZED SERVICE - Keeps boot speed, restores after boot
+# ============================================================
+service user_tunes /vendor/bin/sh -c "
+    # Wait for system to fully settle
+    sleep 8
+    
+    # Step 1: Restore normal governors (from performance to walt)
+    # echo walt > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
+    # echo walt > /sys/devices/system/cpu/cpufreq/policy4/scaling_governor
+    
+    # Step 2: Disable sched_boost (was used only for boot speed)
+    echo 0 > /proc/sys/kernel/sched_boost
+    
+    # Step 3: Apply performance optimizations
+    echo 100 > /proc/sys/vm/swappiness
+    echo 8192 > /proc/sys/vm/min_free_kbytes
+    
+    # Step 4: Set input boost values
+    echo 100 > /proc/sys/walt/input_boost/powerkey_input_boost_ms
+    
+    # Step 5: Set early migration values
+    echo '1873 1204' > /proc/sys/walt/sched_early_downmigrate
+    echo '1584 1077' > /proc/sys/walt/sched_early_upmigrate
+    
+    # Step 6: Set RT parameters
+    echo 1350000 > /proc/sys/kernel/sched_rt_period_us
+    echo 1250000 > /proc/sys/kernel/sched_rt_runtime_us
+    
+    # Step 7: Set sleep disabled
+    echo N > /sys/devices/system/cpu/qcom_lpm/parameters/sleep_disabled
+    
+    # Step 8: Ensure core control is enabled
+    echo 1 > /sys/devices/system/cpu/cpu0/core_ctl/enable
+    echo 1 > /sys/devices/system/cpu/cpu4/core_ctl/enable
+    
+    # Log completion
+    echo 'Boot optimizations applied, normal settings restored!' > /dev/kmsg
+"
+    class late_start
+    user root
+    group root
+    disabled
+    oneshot
+
+# Trigger the service after vendor post-boot and boot completion
+on property:vendor.post_boot.parsed=1 && property:sys.boot_completed=1
+    start user_tunes
+
+service set_micharge_perms /vendor/bin/sh -c "chmod 0666 /sys/class/qcom-battery/restrict_chg /sys/class/qcom-battery/restrict_cur /sys/class/qcom-battery/input_suspend /sys/class/power_supply/battery/constant_charge_current"
+    class late_start
+    user root
+    group root
+    oneshot
+    disabled
+
+on property:sys.boot_completed=1
+    start set_micharge_perms
+
+service getofflinechglog /vendor/bin/sh -c "
+    # Wait for system to fully settle
+    sleep 8
+    dmesg | grep avc > /data/local/offlinechglogs.txt
+"
+    class late_start
+    user root
+    group root
+    disabled
+    oneshot
+
+# Trigger the service after vendor post-boot and boot completion
+on charger
+    start getofflinechglog
