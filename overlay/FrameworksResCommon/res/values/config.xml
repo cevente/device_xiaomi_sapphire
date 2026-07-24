@@ -90,7 +90,7 @@
 
     <!-- If true, the doze component is not started until after the screen has been
          turned off and the screen off animation has been performed. -->
-    <bool name="config_dozeAfterScreenOffByDefault">true</bool>
+    <bool name="config_dozeAfterScreenOffByDefault">false</bool>
 
     <!-- Whether the doze tap gesture is enabled -->
     <bool name="config_dozeTapGestureEnabled">true</bool>
@@ -238,47 +238,41 @@
     <!-- Vibrator pattern for feedback about a long screen/key press -->
     <integer-array name="config_longPressVibePattern">
         <item>0</item>
-        <item>1</item>
-        <item>20</item>
-        <item>21</item>
+        <item>100</item>
     </integer-array>
 
     <!-- Vibrator pattern for feedback about touching a virtual key -->
     <integer-array name="config_virtualKeyVibePattern">
         <item>0</item>
-        <item>10</item>
-        <item>20</item>
-        <item>30</item>
+        <item>80</item>
     </integer-array>
 
     <!-- Vibrator pattern for feedback when selecting an hour/minute tick of a Clock -->
     <integer-array name="config_clockTickVibePattern">
-        <item>125</item>
-        <item>30</item>
+        <item>0</item>
+        <item>50</item>
     </integer-array>
 
     <!-- Vibrator pattern for feedback when selecting a day/month/year date of a Calendar -->
     <integer-array name="config_calendarDateVibePattern">
-        <item>125</item>
-        <item>30</item>
+        <item>0</item>
+        <item>50</item>
     </integer-array>
 
     <!-- Vibrator pattern for feedback about booting with safe mode enabled -->
     <integer-array name="config_safeModeEnabledVibePattern">
         <item>0</item>
-        <item>1</item>
-        <item>20</item>
-        <item>21</item>
-        <item>500</item>
-        <item>600</item>
+        <item>30</item>
+        <item>100</item>
+        <item>30</item>
     </integer-array>
 
     <!-- Vibrator pattern for feedback about hitting a scroll barrier -->
     <integer-array name="config_scrollBarrierVibePattern">
         <item>0</item>
+        <item>25</item>
         <item>15</item>
-        <item>10</item>
-        <item>10</item>
+        <item>25</item>
     </integer-array>
 
     <!-- Vibrator pattern for feedback about a context click -->
@@ -343,7 +337,7 @@
     <bool name="config_enhanced_iwlan_handover_check">false</bool>
 
     <!-- Whether to enable Lineage Health Service -->
-    <bool name="config_lineageHealthSupported">true</bool>
+    <bool name="config_lineageHealthSupported">false</bool>
 
     <!-- Whether WiFi display is supported by this device.
          There are many prerequisites for this feature to work correctly.
@@ -375,7 +369,7 @@
          alpha compositing functionality in hardware.  If set, the window
          manager will disable alpha trasformation in animations where not
          strictly needed. -->
-    <bool name="config_sf_limitedAlpha">true</bool>
+    <bool name="config_sf_limitedAlpha">false</bool>
 
     <!-- Set this to true to enable the platform's auto-power-save modes like doze and
          app standby.  These are not enabled by default because they require a standard
@@ -420,4 +414,5 @@
 
     <!-- Database default sync mode -->
     <string name="db_default_sync_mode">NORMAL</string>
+
 </resources>
