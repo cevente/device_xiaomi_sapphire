@@ -44,7 +44,7 @@
     <bool name="config_avoidGfxAccel">false</bool>
 
     <!-- Whether device has wakeup proximity sensor -->
-    <bool name="config_deviceHaveWakeupProximity">false</bool>
+    <bool name="config_deviceHaveWakeupProximity">true</bool>
 
     <!-- Whether Always On Display is available -->
     <bool name="config_dozeAlwaysOnDisplayAvailable">true</bool>
