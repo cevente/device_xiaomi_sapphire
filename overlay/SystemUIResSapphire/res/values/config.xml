@@ -9,27 +9,24 @@
 
     <!-- Doze: Table that translates sensor values from the doze_brightness_sensor_type sensor
                to brightness values; -1 means keeping the current brightness. -->
-    <integer-array name="config_doze_brightness_sensor_to_brightness">
-        <item>-1</item>
-        <item>-1</item>
-        <item>-1</item>
-        <item>1</item>
-        <item>255</item>
-        <item>1</item>
-    </integer-array>
+<!-- Map sensor values to brightness (0-255, -1 = no change) -->
+<!-- Assuming sensor returns 0-4 based on the thresholds above -->
+<integer-array name="config_doze_brightness_sensor_to_brightness">
+    <item>-1</item>  <!-- 0: Sensor off/Error - no change -->
+    <item>1</item>   <!-- 1: param1 (300) - Very dim AOD -->
+    <item>5</item>   <!-- 2: param2 (2000) - Dim AOD -->
+    <item>20</item>  <!-- 3: param3 (3000) - Medium AOD -->
+    <item>50</item>  <!-- 4: Bright (>3000) - Bright AOD -->
+</integer-array>
 
-    <!-- Doze: Table that translates sensor values from the doze_brightness_sensor_type sensor
-               to an opacity value for a black scrim that is overlayed in AOD1.
-               Valid range is from 0 (transparent) to 255 (opaque).
-               -1 means keeping the current opacity. -->
-    <integer-array name="config_doze_brightness_sensor_to_scrim_opacity">
-        <item>-1</item>
-        <item>0</item>
-        <item>0</item>
-        <item>0</item>
-        <item>0</item>
-        <item>0</item>
-    </integer-array>
+<!-- Map sensor values to scrim opacity (0-255, -1 = no change) -->
+<integer-array name="config_doze_brightness_sensor_to_scrim_opacity">
+    <item>-1</item>  <!-- 0: Sensor off/Error - no change -->
+    <item>200</item> <!-- 1: param1 (300) - High opacity (darker) -->
+    <item>100</item> <!-- 2: param2 (2000) - Medium opacity -->
+    <item>50</item>  <!-- 3: param3 (3000) - Low opacity -->
+    <item>0</item>   <!-- 4: Bright (>3000) - No opacity -->
+</integer-array>
 
     <!-- OEM fast charger status path -->
     <string-array name="config_oemFastChargerStatusPath">
