@@ -714,10 +714,6 @@
     </array>
 
     <!-- ==================== STRING ARRAYS ==================== -->
-
-     <!-- Vendor specific proximity sensor name for Pocket Mode -->
-<string name="config_pocketJudgeVendorProximitySensorName" translatable="false">tmd2755 Proximity Sensor Wakeup</string>
-
     <!-- Disallowed apps in managed profile -->
     <string-array name="disallowed_apps_managed_profile">
         <item>com.miui.mishare.connectivity</item>
