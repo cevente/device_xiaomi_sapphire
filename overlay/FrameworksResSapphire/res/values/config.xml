@@ -7,11 +7,6 @@
 
     <!-- ==================== DIMENS ==================== -->
 
-     <item name="proximity_sensor_threshold" translatable="false" format="float" type="dimen">5.0</item>
-    
-    <!-- If using proximity_sensor_type, specifies a threshold value to distinguish near and far break points. A sensor value more than this is considered "far". If not set, proximity_sensor_threshold is used. This allows one to implement a latching mechanism for noisy sensors. -->
-    <item name="proximity_sensor_threshold_latch" translatable="false" format="float" type="dimen">5.0</item>
-
     <!-- Minimum screen brightness setting allowed by power manager.
          -2 is invalid so setting will resort to int value specified above.
          Set this to 0.0 to allow screen to go to minimal brightness.
@@ -49,7 +44,7 @@
     <bool name="config_avoidGfxAccel">false</bool>
 
     <!-- Whether device has wakeup proximity sensor -->
-    <bool name="config_deviceHaveWakeupProximity">false</bool>
+    <bool name="config_deviceHaveWakeupProximity">true</bool>
 
     <!-- Whether Always On Display is available -->
     <bool name="config_dozeAlwaysOnDisplayAvailable">true</bool>
@@ -94,7 +89,7 @@
     <bool name="config_pocketModeSupported">true</bool>
 
     <!-- Whether pocket mode uses light sensor -->
-    <bool name="config_pocketUseLightSensor">true</bool>
+    <bool name="config_pocketUseLightSensor">false</bool>
 
     <!-- Whether proximity check on FPS unlock is enabled -->
     <bool name="config_proximityCheckOnFpsUnlock">true</bool>
@@ -719,6 +714,10 @@
     </array>
 
     <!-- ==================== STRING ARRAYS ==================== -->
+
+     <!-- Vendor specific proximity sensor name for Pocket Mode -->
+<string name="config_pocketJudgeVendorProximitySensorName" translatable="false">tmd2755 Proximity Sensor Wakeup</string>
+
     <!-- Disallowed apps in managed profile -->
     <string-array name="disallowed_apps_managed_profile">
         <item>com.miui.mishare.connectivity</item>
