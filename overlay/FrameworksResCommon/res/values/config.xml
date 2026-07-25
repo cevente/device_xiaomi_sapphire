@@ -13,6 +13,24 @@
         <item>7,1</item>
     </string-array>
 
+         <!-- Whether pocket mode light sensor is supported -->
+    <bool name="config_pocketModeLightSensorSupported">true</bool>
+
+    <!-- Whether pocket mode is supported -->
+    <bool name="config_pocketModeSupported">true</bool>
+
+    <!-- Whether pocket mode uses light sensor -->
+    <bool name="config_pocketUseLightSensor">true</bool>
+
+    <!-- Whether proximity check on FPS unlock is enabled -->
+    <bool name="config_proximityCheckOnFpsUnlock">true</bool>
+
+    <!-- Whether proximity check on wake is enabled -->
+    <bool name="config_proximityCheckOnWake">true</bool>
+
+    <!-- Whether proximity check on wake is enabled by default -->
+    <bool name="config_proximityCheckOnWakeEnabledByDefault">true</bool>
+
     <!-- Flag indicating whether we should enable the automatic brightness.
          Software implementation will be used if config_hardware_auto_brightness_available is not set -->
     <bool name="config_automatic_brightness_available">true</bool>
