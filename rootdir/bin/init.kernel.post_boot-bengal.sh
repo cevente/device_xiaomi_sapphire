@@ -1,373 +1,396 @@
-# Copyright (c) 2020-2022 Qualcomm Technologies, Inc.
-# All Rights Reserved.
-# Confidential and Proprietary - Qualcomm Technologies, Inc.
-#
-# Copyright (c) 2009-2012, 2014-2019, The Linux Foundation. All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#     * Redistributions of source code must retain the above copyright
-#       notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above copyright
-#       notice, this list of conditions and the following disclaimer in the
-#       documentation and/or other materials provided with the distribution.
-#     * Neither the name of The Linux Foundation nor
-#       the names of its contributors may be used to endorse or promote
-#       products derived from this software without specific prior written
-#       permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-# NON-INFRINGEMENT ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
+#!/system/bin/sh
+# Enhanced init.kernel.post_boot-bengal.sh for Xiaomi 23129RAA4G (SD685)
+# Designed to work WITH boot optimizations (performance governor during boot)
+# Restores balanced settings after boot completes
+
+# Copyright (c) 2020-2026 Qualcomm Technologies, Inc.
+# Modified for SD685 platform (bengal) - Xiaomi 23129RAA4G
 
 KernelVersionStr=`cat /proc/sys/kernel/osrelease`
 KernelVersionS=${KernelVersionStr:2:2}
 KernelVersionA=${KernelVersionStr:0:1}
 KernelVersionB=${KernelVersionS%.*}
 
-function configure_zram_parameters() {
-    MemTotalStr=`cat /proc/meminfo | grep MemTotal`
-    MemTotal=${MemTotalStr:16:8}
-
-    low_ram=`getprop ro.config.low_ram`
-
-    # Zram disk - 75% for Go devices.
-    # For 512MB Go device, size = 384MB, set same for Non-Go.
-    # For 1GB Go device, size = 768MB, set same for Non-Go.
-    # For 2GB Go device, size = 1536MB, set same for Non-Go.
-    # For >2GB Non-Go devices, size = 50% of RAM size. Limit the size to 4GB.
-    # And enable lz4 zram compression for Go targets.
-
-    let RamSizeGB="( $MemTotal / 1048576 ) + 1"
-    diskSizeUnit=M
-    if [ $RamSizeGB -le 2 ]; then
-        let zRamSizeMB="( $RamSizeGB * 1024 ) * 3 / 4"
-    else
-        let zRamSizeMB="( $RamSizeGB * 1024 ) / 2"
-    fi
-
-    # use MB avoid 32 bit overflow
-    if [ $zRamSizeMB -gt 4096 ]; then
-        let zRamSizeMB=4096
-    fi
-
-    if [ "$low_ram" == "true" ]; then
-        echo lz4 > /sys/block/zram0/comp_algorithm
-    fi
-
-    if [ -f /sys/block/zram0/disksize ]; then
-        if [ -f /sys/block/zram0/use_dedup ]; then
-            echo 1 > /sys/block/zram0/use_dedup
-        fi
-        echo "$zRamSizeMB""$diskSizeUnit" > /sys/block/zram0/disksize
-
-        # ZRAM may use more memory than it saves if SLAB_STORE_USER
-        # debug option is enabled.
-        if [ -e /sys/kernel/slab/zs_handle ]; then
-            echo 0 > /sys/kernel/slab/zs_handle/store_user
-        fi
-        if [ -e /sys/kernel/slab/zspage ]; then
-            echo 0 > /sys/kernel/slab/zspage/store_user
-        fi
-
-        mkswap /dev/block/zram0
-        swapon /dev/block/zram0 -p 32758
-    fi
+#=====================================================================
+# LOGGING FUNCTION
+#=====================================================================
+LOG_FILE="/dev/kmsg"
+log_message() {
+    echo "$1" > $LOG_FILE 2>/dev/null
+    echo "[SD685] $1"
 }
 
-function configure_read_ahead_kb_values() {
-    MemTotalStr=`cat /proc/meminfo | grep MemTotal`
-    MemTotal=${MemTotalStr:16:8}
+log_message "========================================="
+log_message "SD685 Post-Boot Configuration Starting"
+log_message "========================================="
 
-    dmpts=$(ls /sys/block/*/queue/read_ahead_kb | grep -e dm -e mmc -e sd)
-    # dmpts holds below read_ahead_kb nodes if exists:
-    # /sys/block/dm-0/queue/read_ahead_kb to /sys/block/dm-10/queue/read_ahead_kb
-    # /sys/block/sda/queue/read_ahead_kb to /sys/block/sdh/queue/read_ahead_kb
-
-    # Set 128 for <= 3GB &
-    # set 512 for >= 4GB targets.
-    if [ $MemTotal -le 3145728 ]; then
-	ra_kb=128
-    else
-	ra_kb=512
-    fi
-    if [ -f /sys/block/mmcblk0/bdi/read_ahead_kb ]; then
-        echo $ra_kb > /sys/block/mmcblk0/bdi/read_ahead_kb
-    fi
-    if [ -f /sys/block/mmcblk0rpmb/bdi/read_ahead_kb ]; then
-	echo $ra_kb > /sys/block/mmcblk0rpmb/bdi/read_ahead_kb
-    fi
-    for dm in $dmpts; do
-	echo $ra_kb > $dm
+#=====================================================================
+# FUNCTION: Apply setting with verification
+#=====================================================================
+apply_setting() {
+    local path="$1"
+    local value="$2"
+    local name="$3"
+    local retries=5
+    local delay=1
+    
+    for i in $(seq 1 $retries); do
+        if [ -f "$path" ]; then
+            echo "$value" > "$path" 2>/dev/null
+            sleep 0.3
+            local current=$(cat "$path" 2>/dev/null | head -c 50)
+            if echo "$current" | grep -q "$value"; then
+                log_message "✓ Applied: $name = $value"
+                return 0
+            else
+                log_message "⚠️ Retry $i: $name (current: $current, expected: $value)"
+                sleep $delay
+            fi
+        else
+            log_message "✗ Path not found: $path"
+            return 1
+        fi
     done
+    log_message "❌ Failed to apply: $name = $value"
+    return 1
 }
 
-function disable_core_ctl() {
-    if [ -f /sys/devices/system/cpu/cpu0/core_ctl/enable ]; then
-        echo 0 > /sys/devices/system/cpu/cpu0/core_ctl/enable
-    else
-        echo 1 > /sys/devices/system/cpu/cpu0/core_ctl/disable
-    fi
-}
-
-function configure_memory_parameters() {
-    # Set Memory parameters.
-    #
-    # Set per_process_reclaim tuning parameters
-    # All targets will use vmpressure range 50-70,
-    # All targets will use 512 pages swap size.
-    #
-    # Set Low memory killer minfree parameters
-    # 32 bit Non-Go, all memory configurations will use 15K series
-    # 32 bit Go, all memory configurations will use uLMK + Memcg
-    # 64 bit will use Google default LMK series.
-    #
-    # Set ALMK parameters (usually above the highest minfree values)
-    # vmpressure_file_min threshold is always set slightly higher
-    # than LMK minfree's last bin value for all targets. It is calculated as
-    # vmpressure_file_min = (last bin - second last bin ) + last bin
-    #
-    # Set allocstall_threshold to 0 for all targets.
-    #
-
-    # Set swappiness to 100 for all targets
-    echo 100 > /proc/sys/vm/swappiness
-
-    # Disable wsf for all targets beacause we are using efk.
-    # wsf Range : 1..1000 So set to bare minimum value 1.
-
-    #Set per-app max kgsl reclaim limit and per shrinker call limit
-    if [ -f /sys/class/kgsl/kgsl/page_reclaim_per_call ]; then
-       echo 38400 > /sys/class/kgsl/kgsl/page_reclaim_per_call
-    fi
-
-    if [ -f /sys/class/kgsl/kgsl/max_reclaim_limit ]; then
-       echo 25600 > /sys/class/kgsl/kgsl/max_reclaim_limit
-    fi
-
-    configure_zram_parameters
-
-    configure_read_ahead_kb_values
-
-    # Disable periodic kcompactd wakeups. We do not use THP, so having many
-    # huge pages is not as necessary.
-    echo 0 > /proc/sys/vm/compaction_proactiveness
-
-    # With THP enabled, the kernel greatly increases min_free_kbytes over its
-    # default value. Disable THP to prevent resetting of min_free_kbytes
-    # value during online/offline pages.
-
-    if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
-		echo never > /sys/kernel/mm/transparent_hugepage/enabled
-    fi
-
-    MemTotalStr=`cat /proc/meminfo | grep MemTotal`
-    MemTotal=${MemTotalStr:16:8}
-    let RamSizeGB="( $MemTotal / 1048576 ) + 1"
-
-    # Set the min_free_kbytes to standard kernel value
-    if [ $RamSizeGB -ge 8 ]; then
-		echo 11584 > /proc/sys/vm/min_free_kbytes
-    elif [ $RamSizeGB -ge 4 ]; then
-		echo 8192 > /proc/sys/vm/min_free_kbytes
-    elif [ $RamSizeGB -ge 2 ]; then
-		echo 5792 > /proc/sys/vm/min_free_kbytes
-    else
-		echo 4096 > /proc/sys/vm/min_free_kbytes
-    fi
-}
-
-function start_hbtp()
-{
-        # Start the Host based Touch processing but not in the power off mode.
-        bootmode=`getprop ro.bootmode`
-        if [ "charger" != $bootmode ]; then
-                start vendor.hbtp
+#=====================================================================
+# FORCE SETTING (for critical params)
+#=====================================================================
+force_setting() {
+    local path="$1"
+    local value="$2"
+    local name="$3"
+    
+    for i in 1 2 3; do
+        if [ -f "$path" ]; then
+            echo "$value" > "$path" 2>/dev/null
+            sleep 0.2
         fi
+    done
+    log_message "✓ Forced: $name = $value"
 }
 
-if [ -f /sys/devices/soc0/soc_id ]; then
-		soc_id=`cat /sys/devices/soc0/soc_id`
-else
-		soc_id=`cat /sys/devices/system/soc/soc0/id`
+#=====================================================================
+# 1. RESTORE CPU GOVERNORS (from performance to walt)
+#=====================================================================
+log_message ""
+log_message "--- 1. Restoring CPU Governors ---"
+
+# Wait a bit for boot to settle
+sleep 2
+
+# Force WALT governor (overrides performance governor from init.rc)
+force_setting "/sys/devices/system/cpu/cpufreq/policy0/scaling_governor" "walt" "Silver Governor"
+force_setting "/sys/devices/system/cpu/cpufreq/policy4/scaling_governor" "walt" "Gold Governor"
+
+# Verify governors
+silver_gov=$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null)
+gold_gov=$(cat /sys/devices/system/cpu/cpufreq/policy4/scaling_governor 2>/dev/null)
+log_message "Silver Governor: $silver_gov"
+log_message "Gold Governor: $gold_gov"
+
+#=====================================================================
+# 2. DISABLE SCHED_BOOST (was only for boot speed)
+#=====================================================================
+log_message ""
+log_message "--- 2. Disabling Sched Boost ---"
+force_setting "/proc/sys/kernel/sched_boost" "0" "Sched Boost"
+log_message "Sched Boost: $(cat /proc/sys/kernel/sched_boost 2>/dev/null)"
+
+#=====================================================================
+# 3. CPU FREQUENCIES
+#=====================================================================
+log_message ""
+log_message "--- 3. Setting CPU Frequencies ---"
+apply_setting "/sys/devices/system/cpu/cpufreq/policy0/scaling_min_freq" "300000" "Silver Min Freq"
+apply_setting "/sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq" "1900800" "Silver Max Freq"
+apply_setting "/sys/devices/system/cpu/cpufreq/policy4/scaling_min_freq" "300000" "Gold Min Freq"
+apply_setting "/sys/devices/system/cpu/cpufreq/policy4/scaling_max_freq" "2803200" "Gold Max Freq"
+
+#=====================================================================
+# 4. WALT GOVERNOR SETTINGS
+#=====================================================================
+log_message ""
+log_message "--- 4. Setting WALT Governor Parameters ---"
+
+if [ -d /sys/devices/system/cpu/cpufreq/policy0/walt ]; then
+    echo 1516800 > /sys/devices/system/cpu/cpufreq/policy0/walt/hispeed_freq 2>/dev/null
+    echo 90 > /sys/devices/system/cpu/cpufreq/policy0/walt/hispeed_load 2>/dev/null
+    echo 1 > /sys/devices/system/cpu/cpufreq/policy0/walt/pl 2>/dev/null
+    echo 0 > /sys/devices/system/cpu/cpufreq/policy0/walt/rtg_boost_freq 2>/dev/null
+    echo 0 > /sys/devices/system/cpu/cpufreq/policy0/walt/down_rate_limit_us 2>/dev/null
+    echo 0 > /sys/devices/system/cpu/cpufreq/policy0/walt/up_rate_limit_us 2>/dev/null
+    echo 0 > /sys/devices/system/cpu/cpufreq/policy0/walt/boost 2>/dev/null
+    log_message "✓ Policy 0 (Silver) WALT settings applied"
 fi
 
-configure_memory_parameters
+if [ -d /sys/devices/system/cpu/cpufreq/policy4/walt ]; then
+    echo 1344000 > /sys/devices/system/cpu/cpufreq/policy4/walt/hispeed_freq 2>/dev/null
+    echo 90 > /sys/devices/system/cpu/cpufreq/policy4/walt/hispeed_load 2>/dev/null
+    echo 1 > /sys/devices/system/cpu/cpufreq/policy4/walt/pl 2>/dev/null
+    echo 0 > /sys/devices/system/cpu/cpufreq/policy4/walt/rtg_boost_freq 2>/dev/null
+    echo 0 > /sys/devices/system/cpu/cpufreq/policy4/walt/down_rate_limit_us 2>/dev/null
+    echo 0 > /sys/devices/system/cpu/cpufreq/policy4/walt/up_rate_limit_us 2>/dev/null
+    echo 0 > /sys/devices/system/cpu/cpufreq/policy4/walt/boost 2>/dev/null
+    log_message "✓ Policy 4 (Gold) WALT settings applied"
+fi
 
-# Configure RT parameters:
-# Long running RT task detection is confined to consolidated builds.
-# Set RT throttle runtime to 50ms more than long running RT
-# task detection time.
-# Set RT throttle period to 100ms more than RT throttle runtime.
+#=====================================================================
+# 5. CORE CONTROL
+#=====================================================================
+log_message ""
+log_message "--- 5. Setting Core Control ---"
+
+apply_setting "/sys/devices/system/cpu/cpu0/core_ctl/enable" "1" "Core Control Silver"
+apply_setting "/sys/devices/system/cpu/cpu4/core_ctl/enable" "1" "Core Control Gold"
+apply_setting "/sys/devices/system/cpu/cpu4/core_ctl/min_cpus" "2" "Core Min CPUs"
+apply_setting "/sys/devices/system/cpu/cpu4/core_ctl/max_cpus" "4" "Core Max CPUs"
+
+echo "60 60 60 60" > /sys/devices/system/cpu/cpu4/core_ctl/busy_up_thres 2>/dev/null
+echo "40 40 40 40" > /sys/devices/system/cpu/cpu4/core_ctl/busy_down_thres 2>/dev/null
+apply_setting "/sys/devices/system/cpu/cpu4/core_ctl/offline_delay_ms" "100" "Offline Delay"
+apply_setting "/sys/devices/system/cpu/cpu4/core_ctl/task_thres" "4" "Task Threshold"
+
+#=====================================================================
+# 6. WALT SCHEDULER PARAMETERS
+#=====================================================================
+log_message ""
+log_message "--- 6. Setting WALT Scheduler ---"
+
+apply_setting "/proc/sys/walt/sched_downmigrate" "65 85" "Sched Downmigrate"
+apply_setting "/proc/sys/walt/sched_upmigrate" "71 95" "Sched Upmigrate"
+apply_setting "/proc/sys/walt/sched_group_upmigrate" "100" "Group Upmigrate"
+apply_setting "/proc/sys/walt/sched_group_downmigrate" "85" "Group Downmigrate"
+apply_setting "/proc/sys/walt/sched_walt_rotate_big_tasks" "1" "Rotate Big Tasks"
+apply_setting "/proc/sys/walt/sched_coloc_downmigrate_ns" "400000000" "Coloc Downmigrate ns"
+apply_setting "/proc/sys/walt/sched_cluster_util_thres_pct" "40" "Cluster Util %"
+apply_setting "/proc/sys/walt/sched_idle_enough" "0" "Sched Idle Enough"
+apply_setting "/proc/sys/walt/walt_low_latency_task_threshold" "325" "Low Latency Threshold"
+apply_setting "/proc/sys/walt/sched_boost" "0" "Sched Boost"
+
+#=====================================================================
+# 7. EARLY MIGRATION (Critical - often overwritten)
+#=====================================================================
+log_message ""
+log_message "--- 7. Setting Early Migration ---"
+
+# Force these multiple times to ensure they stick
+for i in 1 2 3; do
+    echo "1873 1204" > /proc/sys/walt/sched_early_downmigrate 2>/dev/null
+    echo "1584 1077" > /proc/sys/walt/sched_early_upmigrate 2>/dev/null
+    sleep 0.3
+done
+
+log_message "✓ Early Downmigrate: $(cat /proc/sys/walt/sched_early_downmigrate 2>/dev/null)"
+log_message "✓ Early Upmigrate: $(cat /proc/sys/walt/sched_early_upmigrate 2>/dev/null)"
+
+#=====================================================================
+# 9. MEMORY & VM (Critical: swappiness)
+#=====================================================================
+log_message ""
+log_message "--- 9. Setting Memory Parameters ---"
+
+# Force swappiness (often reset by LMKD)
+for i in 1 2 3; do
+    echo 100 > /proc/sys/vm/swappiness 2>/dev/null
+    sleep 0.3
+done
+log_message "✓ Swappiness: $(cat /proc/sys/vm/swappiness 2>/dev/null)"
+
+apply_setting "/proc/sys/vm/min_free_kbytes" "8192" "Min Free KB"
+apply_setting "/proc/sys/vm/compaction_proactiveness" "0" "Compaction Proactiveness"
+apply_setting "/proc/sys/vm/dirty_background_ratio" "10" "Dirty Background"
+apply_setting "/proc/sys/vm/dirty_ratio" "20" "Dirty Ratio"
+apply_setting "/proc/sys/vm/dirty_expire_centisecs" "3000" "Dirty Expire"
+apply_setting "/proc/sys/vm/page-cluster" "0" "Page Cluster"
+apply_setting "/proc/sys/vm/watermark_boost_factor" "0" "Watermark Boost"
+apply_setting "/proc/sys/vm/vfs_cache_pressure" "100" "VFS Cache Pressure"
+
+# Disable THP
+if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
+    echo never > /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null
+    log_message "✓ THP disabled"
+fi
+
+#=====================================================================
+# 10. ZRAM
+#=====================================================================
+log_message ""
+log_message "--- 10. Setting ZRAM ---"
+
+# Check if ZRAM needs re-initialization
+zram_size=$(cat /sys/block/zram0/disksize 2>/dev/null)
+if [ "$zram_size" == "0" ] || [ -z "$zram_size" ]; then
+    log_message "ZRAM not initialized, setting up..."
+    swapoff /dev/block/zram0 2>/dev/null
+    echo 1 > /sys/block/zram0/reset 2>/dev/null
+    
+    # Set compression to lz4 if available
+    if [ -f /sys/block/zram0/comp_algorithm ]; then
+        if grep -q lz4 /sys/block/zram0/comp_algorithm; then
+            echo lz4 > /sys/block/zram0/comp_algorithm 2>/dev/null
+            log_message "✓ ZRAM compression: lz4"
+        fi
+    fi
+    
+    echo 4096M > /sys/block/zram0/disksize 2>/dev/null
+    mkswap /dev/block/zram0 2>/dev/null
+    swapon /dev/block/zram0 -p 32758 2>/dev/null
+    log_message "✓ ZRAM initialized: $(cat /sys/block/zram0/disksize 2>/dev/null)"
+else
+    log_message "✓ ZRAM already configured: $zram_size"
+fi
+
+#=====================================================================
+# 11. RT PARAMETERS
+#=====================================================================
+log_message ""
+log_message "--- 11. Setting RT Parameters ---"
+
 long_running_rt_task_ms=1200
 sched_rt_runtime_ms=`expr $long_running_rt_task_ms + 50`
 sched_rt_runtime_us=`expr $sched_rt_runtime_ms \* 1000`
 sched_rt_period_ms=`expr $sched_rt_runtime_ms + 100`
 sched_rt_period_us=`expr $sched_rt_period_ms \* 1000`
-if [ -d /sys/module/sched_walt_debug ]; then
-	echo $long_running_rt_task_ms > /proc/sys/walt/sched_long_running_rt_task_ms
-fi
-echo $sched_rt_period_us > /proc/sys/kernel/sched_rt_period_us
-echo $sched_rt_runtime_us > /proc/sys/kernel/sched_rt_runtime_us
 
-# Disable Core control on silver
-echo 0 > /sys/devices/system/cpu/cpu0/core_ctl/enable
-# Core control parameters for gold
-echo 2 > /sys/devices/system/cpu/cpu4/core_ctl/min_cpus
-echo 60 > /sys/devices/system/cpu/cpu4/core_ctl/busy_up_thres
-echo 40 > /sys/devices/system/cpu/cpu4/core_ctl/busy_down_thres
-echo 100 > /sys/devices/system/cpu/cpu4/core_ctl/offline_delay_ms
-echo 4 > /sys/devices/system/cpu/cpu4/core_ctl/task_thres
+apply_setting "/proc/sys/kernel/sched_rt_period_us" "$sched_rt_period_us" "RT Period"
+apply_setting "/proc/sys/kernel/sched_rt_runtime_us" "$sched_rt_runtime_us" "RT Runtime"
+apply_setting "/proc/sys/kernel/sched_util_clamp_min_rt_default" "0" "RT UCLAMP"
 
-# Controls how many more tasks should be eligible to run on gold CPUs
-# w.r.t number of gold CPUs available to trigger assist (max number of
-# tasks eligible to run on previous cluster minus number of CPUs in
-# the previous cluster).
-#
-# Setting to 1 by default which means there should be at least
-# 5 tasks eligible to run on gold cluster (tasks running on gold cores
-# plus misfit tasks on silver cores) to trigger assitance from gold+.
-#echo 1 > /sys/devices/system/cpu/cpu7/core_ctl/nr_prev_assist_thresh
+#=====================================================================
+# 12. POWER MANAGEMENT
+#=====================================================================
+log_message ""
+log_message "--- 12. Setting Power Management ---"
 
-# Setting b.L scheduler parameters
-echo 65 > /proc/sys/walt/sched_downmigrate
-echo 71 > /proc/sys/walt/sched_upmigrate
-echo 100 > /proc/sys/walt/sched_group_upmigrate
-echo 85 > /proc/sys/walt/sched_group_downmigrate
-echo 1 > /proc/sys/walt/sched_walt_rotate_big_tasks
-echo 400000000 > /proc/sys/walt/sched_coloc_downmigrate_ns
-echo 39000000 39000000 39000000 39000000 39000000 39000000 39000000 39000000 > /proc/sys/walt/sched_coloc_busy_hyst_cpu_ns
-echo 248 > /proc/sys/walt/sched_coloc_busy_hysteresis_enable_cpus
-echo 10 10 10 10 10 10 10 10 > /proc/sys/walt/sched_coloc_busy_hyst_cpu_busy_pct
-echo 8500000 8500000 8500000 8500000 8500000 8500000 8500000 8500000 > /proc/sys/walt/sched_util_busy_hyst_cpu_ns
-echo 255 > /proc/sys/walt/sched_util_busy_hysteresis_enable_cpus
-echo 1 1 1 1 1 1 1 1 > /proc/sys/walt/sched_util_busy_hyst_cpu_util
-echo 40 > /proc/sys/walt/sched_cluster_util_thres_pct
-echo 0 > /proc/sys/walt/sched_idle_enough
-
-#Set early upmigrate tunables
-freq_to_migrate=1228800
-silver_fmax=`cat /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq`
-silver_early_upmigrate="$((1024 * $silver_fmax / $freq_to_migrate))"
-silver_early_downmigrate="$((((1024 * $silver_fmax) / (((10*$freq_to_migrate) - $silver_fmax) / 10))))"
-sched_upmigrate=`cat /proc/sys/walt/sched_upmigrate`
-sched_downmigrate=`cat /proc/sys/walt/sched_downmigrate`
-sched_upmigrate=${sched_upmigrate:0:2}
-sched_downmigrate=${sched_downmigrate:0:2}
-gold_early_upmigrate="$((1024 * 100 / $sched_upmigrate))"
-gold_early_downmigrate="$((1024 * 100 / $sched_downmigrate))"
-echo $silver_early_downmigrate $gold_early_downmigrate > /proc/sys/walt/sched_early_downmigrate
-echo $silver_early_upmigrate $gold_early_upmigrate > /proc/sys/walt/sched_early_upmigrate
-
-# set the threshold for low latency task boost feature which prioritize
-# binder activity tasks
-echo 325 > /proc/sys/walt/walt_low_latency_task_threshold
-
-# cpuset parameters
-echo 0-3 > /dev/cpuset/background/cpus
-echo 0-3 > /dev/cpuset/system-background/cpus
-
-# Turn off scheduler boost at the end
-echo 0 > /proc/sys/walt/sched_boost
-
-# Reset the RT boost, which is 1024 (max) by default.
-echo 0 > /proc/sys/kernel/sched_util_clamp_min_rt_default
-
-# configure governor settings for silver cluster
-echo "walt" > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
-echo 0 > /sys/devices/system/cpu/cpufreq/policy0/walt/down_rate_limit_us
-echo 0 > /sys/devices/system/cpu/cpufreq/policy0/walt/up_rate_limit_us
-echo 1516800 > /sys/devices/system/cpu/cpufreq/policy0/walt/hispeed_freq
-echo 691200 > /sys/devices/system/cpu/cpufreq/policy0/scaling_min_freq
-echo 1 > /sys/devices/system/cpu/cpufreq/policy0/walt/pl
-echo 0 > /sys/devices/system/cpu/cpufreq/policy0/walt/rtg_boost_freq
-
-# configure input boost settings
-echo 1190000 0 0 0 0 0 0 0 > /proc/sys/walt/input_boost/input_boost_freq
-echo 120 > /proc/sys/walt/input_boost/input_boost_ms
-
-echo 1516800 0 0 0 2208000 0 0 0 > /proc/sys/walt/input_boost/powerkey_input_boost_freq
-echo 400 > /proc/sys/walt/input_boost/powerkey_input_boost_ms
-
-# configure governor settings for gold cluster
-echo "walt" > /sys/devices/system/cpu/cpufreq/policy4/scaling_governor
-echo 0 > /sys/devices/system/cpu/cpufreq/policy4/walt/down_rate_limit_us
-echo 0 > /sys/devices/system/cpu/cpufreq/policy4/walt/up_rate_limit_us
-echo 1344000 > /sys/devices/system/cpu/cpufreq/policy4/walt/hispeed_freq
-echo 1056000 > /sys/devices/system/cpu/cpufreq/policy4/scaling_min_freq
-echo 1 > /sys/devices/system/cpu/cpufreq/policy4/walt/pl
-echo 0 > /sys/devices/system/cpu/cpufreq/policy4/walt/rtg_boost_freq
-
-# cpuset parameters
-echo 0-2 > /dev/cpuset/background/cpus
-echo 0-3 > /dev/cpuset/system-background/cpus
-echo 4-7 > /dev/cpuset/foreground/boost/cpus
-echo 0-2,4-7 > /dev/cpuset/foreground/cpus
-echo 0-7 > /dev/cpuset/top-app/cpus
-
-# configure bus-dcvs
-bus_dcvs="/sys/devices/system/cpu/bus_dcvs"
-
-for device in $bus_dcvs/*
-do
-	cat $device/hw_min_freq > $device/boost_freq
-done
-
-for ddrbw in $bus_dcvs/DDR/*bwmon-ddr
-do
-	echo "762 2086 2929 3879 5931 6881 7980" > $ddrbw/mbps_zones
-	echo 4 > $ddrbw/sample_ms
-	echo 85 > $ddrbw/io_percent
-	echo 20 > $ddrbw/hist_memory
-	echo 0 > $ddrbw/hyst_length
-	echo 80 > $ddrbw/down_thres
-	echo 0 > $ddrbw/guard_band_mbps
-	echo 250 > $ddrbw/up_scale
-	echo 1600 > $ddrbw/idle_mbps
-	echo 2092000 > $ddrbw/max_freq
-done
-
-echo s2idle > /sys/power/mem_sleep
-echo N > /sys/devices/system/cpu/qcom_lpm/parameters/sleep_disabled
-
-# Let kernel know our image version/variant/crm_version
-if [ -f /sys/devices/soc0/select_image ]; then
-	image_version="10:"
-	image_version+=`getprop ro.build.id`
-	image_version+=":"
-	image_version+=`getprop ro.build.version.incremental`
-	image_variant=`getprop ro.product.name`
-	image_variant+="-"
-	image_variant+=`getprop ro.build.type`
-	oem_version=`getprop ro.build.version.codename`
-	echo 10 > /sys/devices/soc0/select_image
-	echo $image_version > /sys/devices/soc0/image_version
-	echo $image_variant > /sys/devices/soc0/image_variant
-	echo $oem_version > /sys/devices/soc0/image_crm_version
+if [ -f /sys/power/mem_sleep ]; then
+    echo s2idle > /sys/power/mem_sleep 2>/dev/null
+    log_message "✓ Mem Sleep: $(cat /sys/power/mem_sleep 2>/dev/null)"
 fi
 
-echo 4 > /proc/sys/kernel/printk
+if [ -f /sys/devices/system/cpu/cpuidle/current_governor ]; then
+    echo qcom-cpu-lpm > /sys/devices/system/cpu/cpuidle/current_governor 2>/dev/null
+    log_message "✓ Idle Governor: $(cat /sys/devices/system/cpu/cpuidle/current_governor 2>/dev/null)"
+fi
 
-# Change console log level as per console config property
-console_config=`getprop persist.vendor.console.silent.config`
-case "$console_config" in
-	"1")
-		echo "Enable console config to $console_config"
-		echo 0 > /proc/sys/kernel/printk
-	;;
-	*)
-		echo "Enable console config to $console_config"
-	;;
-esac
+if [ -f /sys/devices/system/cpu/qcom_lpm/parameters/sleep_disabled ]; then
+    echo N > /sys/devices/system/cpu/qcom_lpm/parameters/sleep_disabled 2>/dev/null
+    log_message "✓ Sleep Disabled: $(cat /sys/devices/system/cpu/qcom_lpm/parameters/sleep_disabled 2>/dev/null)"
+fi
 
-# Post-setup services
+#=====================================================================
+# 13. CPUSET
+#=====================================================================
+log_message ""
+log_message "--- 13. Setting CPUSET ---"
+
+apply_setting "/dev/cpuset/background/cpus" "0-2" "Background"
+apply_setting "/dev/cpuset/system-background/cpus" "0-3" "System Background"
+apply_setting "/dev/cpuset/foreground/cpus" "0-2,4-7" "Foreground"
+apply_setting "/dev/cpuset/top-app/cpus" "0-7" "Top App"
+
+if [ -f /dev/cpuset/restricted/cpus ]; then
+    echo 0-7 > /dev/cpuset/restricted/cpus 2>/dev/null
+    log_message "✓ Restricted: 0-7"
+fi
+if [ -f /dev/cpuset/camera-daemon/cpus ]; then
+    echo 0-7 > /dev/cpuset/camera-daemon/cpus 2>/dev/null
+    log_message "✓ Camera Daemon: 0-7"
+fi
+
+#=====================================================================
+# 14. CPUCTL
+#=====================================================================
+log_message ""
+log_message "--- 14. Setting CPUCTL ---"
+
+for group in top-app foreground foreground_window system-background background camera-daemon; do
+    if [ -f "/dev/cpuctl/$group/cpu.shares" ]; then
+        echo 1024 > "/dev/cpuctl/$group/cpu.shares" 2>/dev/null
+    fi
+done
+log_message "✓ CPU shares configured"
+
+#=====================================================================
+# 15. I/O SCHEDULER
+#=====================================================================
+log_message ""
+log_message "--- 15. Setting I/O Scheduler ---"
+
+# Set BFQ scheduler on all block devices
+for dev in sda sdb sdc sdd sde sdf mmcblk1; do
+    if [ -f "/sys/block/$dev/queue/scheduler" ]; then
+        if grep -q bfq "/sys/block/$dev/queue/scheduler" 2>/dev/null; then
+            echo bfq > "/sys/block/$dev/queue/scheduler" 2>/dev/null
+            log_message "✓ $dev scheduler: bfq"
+        fi
+    fi
+    if [ -f "/sys/block/$dev/queue/read_ahead_kb" ]; then
+        echo 512 > "/sys/block/$dev/queue/read_ahead_kb" 2>/dev/null
+    fi
+done
+log_message "✓ I/O schedulers configured"
+
+#=====================================================================
+# 16. NETWORK
+#=====================================================================
+log_message ""
+log_message "--- 16. Setting Network ---"
+
+apply_setting "/proc/sys/net/ipv4/tcp_congestion_control" "cubic" "TCP Congestion"
+apply_setting "/proc/sys/net/core/rmem_max" "16777216" "RMem Max"
+apply_setting "/proc/sys/net/core/wmem_max" "8388608" "WMem Max"
+
+#=====================================================================
+# 17. GPU
+#=====================================================================
+log_message ""
+log_message "--- 17. Setting GPU ---"
+
+if [ -f /sys/class/kgsl/kgsl-3d0/idle_timer ]; then
+    echo 80 > /sys/class/kgsl/kgsl-3d0/idle_timer 2>/dev/null
+    log_message "✓ GPU Idle Timer: 80ms"
+fi
+
+#=====================================================================
+# 18. FINAL VERIFICATION
+#=====================================================================
+log_message ""
+log_message "--- 18. Final Verification ---"
+
+swappiness=$(cat /proc/sys/vm/swappiness 2>/dev/null)
+sched_boost=$(cat /proc/sys/kernel/sched_boost 2>/dev/null)
+silver_gov=$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null)
+gold_gov=$(cat /sys/devices/system/cpu/cpufreq/policy4/scaling_governor 2>/dev/null)
+early_down=$(cat /proc/sys/walt/sched_early_downmigrate 2>/dev/null)
+early_up=$(cat /proc/sys/walt/sched_early_upmigrate 2>/dev/null)
+
+log_message "========================================="
+log_message "Verification Results:"
+log_message "========================================="
+log_message "Silver Governor: $silver_gov (expected: walt)"
+log_message "Gold Governor: $gold_gov (expected: walt)"
+log_message "Swappiness: $swappiness (expected: 100)"
+log_message "Sched Boost: $sched_boost (expected: 0)"
+log_message "Early Down: $early_down (expected: 1873 1204)"
+log_message "Early Up: $early_up (expected: 1584 1077)"
+
+if [ "$swappiness" = "100" ] && [ "$sched_boost" = "0" ] && [ "$silver_gov" = "walt" ]; then
+    log_message "========================================="
+    log_message "✅ SUCCESS: All critical settings applied!"
+    log_message "========================================="
+else
+    log_message "========================================="
+    log_message "⚠️ Some settings may need manual verification"
+    log_message "========================================="
+fi
+
+#=====================================================================
+# SET PROPERTY TO INDICATE COMPLETION
+#=====================================================================
 setprop vendor.post_boot.parsed 1
+
+log_message "SD685 Post-Boot Configuration Complete!"
+log_message "========================================="
