@@ -15,6 +15,9 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <linux/input.h>
+#include <dirent.h>
+#include <limits.h>
 
 #include <atomic>
 #include <cerrno>
@@ -45,7 +48,6 @@
 #define TOUCH_IOC_GET_CUR_VALUE _IO(TOUCH_MAGIC, GET_CUR_VALUE)
 
 #define DISP_FEATURE_PATH "/dev/mi_display/disp_feature"
-#define FOD_PRESS_STATUS_PATH "/sys/class/touch/touch_dev/fod_press_status"
 #define BRIGHTNESS_PATH "/sys/class/backlight/panel0-backlight/brightness"
 
 using ::aidl::android::hardware::biometrics::fingerprint::AcquiredInfo;
@@ -83,6 +85,44 @@ static disp_event_resp* parseDispEvent(int fd) {
     }
 
     return reinterpret_cast<disp_event_resp*>(event_data);
+}
+
+static int open_ts_input() {
+    int fd = -1;
+    DIR *dir = opendir("/dev/input");
+
+    if (dir != NULL) {
+        struct dirent *ent;
+
+        while ((ent = readdir(dir)) != NULL) {
+            if (ent->d_type == DT_CHR) {
+                char absolute_path[PATH_MAX] = {0};
+                char name[80] = {0};
+
+                strcpy(absolute_path, "/dev/input/");
+                strcat(absolute_path, ent->d_name);
+
+                fd = open(absolute_path, O_RDWR);
+                if (fd < 0) {
+                    continue;
+                }
+
+                if (ioctl(fd, EVIOCGNAME(sizeof(name) - 1), &name) > 0) {
+                    // Added "fts_ts" specifically for your device
+                    if (strcmp(name, "fts_ts") == 0 || strcmp(name, "fts") == 0 || 
+                        strcmp(name, "goodix_ts") == 0 || strcmp(name, "NVTCapacitiveTouchScreen") == 0) {
+                        LOG(INFO) << "Found touchscreen: " << name << " at " << absolute_path;
+                        break;
+                    }
+                }
+
+                close(fd);
+                fd = -1;
+            }
+        }
+        closedir(dir);
+    }
+    return fd;
 }
 
 }  // anonymous namespace
@@ -478,72 +518,76 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void fodPressMonitorThread() {
-        LOG(INFO) << "FOD press monitor thread started";
+        LOG(INFO) << "Native input event monitor thread started";
         
-        int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
+        int fd = -1;
+        // Keep attempting to find the touchscreen on boot
+        while (isRunning.load() && fd < 0) {
+            fd = open_ts_input();
+            if (fd < 0) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+        }
+
         if (fd < 0) {
-            LOG(ERROR) << "Failed to open " << FOD_PRESS_STATUS_PATH 
-                       << ", error: " << strerror(errno);
+            LOG(ERROR) << "Failed to find touchscreen input device";
             return;
         }
 
-        readBool(fd);
-
-        struct pollfd fodPressStatusPoll = {
+        struct pollfd tsPoll = {
             .fd = fd,
-            .events = POLLERR | POLLPRI,
+            .events = POLLIN,
             .revents = 0,
         };
 
+        struct input_event ev;
+        
         while (isRunning.load()) {
-            int rc = poll(&fodPressStatusPoll, 1, 1000);
+            int rc = poll(&tsPoll, 1, 1000);
             
             if (rc < 0) {
                 if (errno == EINTR) continue;
-                LOG(ERROR) << "Poll failed: " << strerror(errno);
+                LOG(ERROR) << "Input poll failed: " << strerror(errno);
                 break;
             }
 
             if (rc == 0) continue;
 
-            if (!(fodPressStatusPoll.revents & (POLLERR | POLLPRI))) {
-                if (fodPressStatusPoll.revents & (POLLHUP | POLLNVAL)) {
-                    LOG(ERROR) << "Poll error event: " << fodPressStatusPoll.revents;
-                    break;
+            if (tsPoll.revents & POLLIN) {
+                ssize_t bytesRead = read(fd, &ev, sizeof(struct input_event));
+                
+                if (bytesRead < (ssize_t)sizeof(struct input_event)) {
+                    continue;
                 }
-                fodPressStatusPoll.revents = 0;
-                continue;
-            }
 
-            fodPressStatusPoll.revents = 0;
+                // Filter for KEY events (0x01) and BTN_INFO (0x0152)
+                if (ev.type == EV_KEY && ev.code == 0x0152) {
+                    bool pressed = (ev.value == 1);
+                    mIsFingerDown = pressed;
+                    
+                    bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
+                    if (!isScreenOffEnabled && getBrightness() == 0) {
+                        LOG(INFO) << "UDFPS: Touch ignored. Screen-Off disabled.";
+                        continue;
+                    }
 
-            const bool pressed = readBool(fd);
-            mIsFingerDown = pressed;
-            
-            bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
-            if (!isScreenOffEnabled && getBrightness() == 0) {
-                LOG(INFO) << "UDFPS: Touch ignored. Screen-Off disabled.";
-                continue;
-            }
-
-            LOG(DEBUG) << "fod_press_status changed: " << (pressed ? "pressed" : "released");
-            
-            if (!pressed) {
-                LOG(INFO) << "💡 Screen-off FOD lift detected";
-                // Just call setFingerDown(false) - it will handle deferred cleanup
-                setFingerDown(false);
-                if (!enrolling.load()) {
-                    setFodStatus(FOD_STATUS_OFF);
+                    LOG(DEBUG) << "Native BTN_INFO event detected: " << (pressed ? "pressed" : "released");
+                    
+                    if (!pressed) {
+                        LOG(INFO) << "💡 Screen-off FOD lift detected via EV_KEY";
+                        setFingerDown(false);
+                        if (!enrolling.load()) {
+                            setFodStatus(FOD_STATUS_OFF);
+                        }
+                    } else {
+                        setFingerDown(true);
+                    }
                 }
-            } else {
-                setFingerDown(true);
             }
-            
-            readBool(fd);
         }
 
         close(fd);
-        LOG(INFO) << "FOD press monitor thread stopped";
+        LOG(INFO) << "Native input event monitor thread stopped";
     }
 
     void displayEventMonitorThread() {
