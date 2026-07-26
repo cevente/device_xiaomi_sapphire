@@ -29,9 +29,9 @@
 #include <condition_variable>
 
 // Display and DRM Headers
-#include "display/drm/mi_disp.h"
-#include "display/drm/sde_drm.h"
-#include "display/drm/msm_drm_pp.h"
+#include "mi_disp.h"
+#include "sde_drm.h"
+#include "msm_drm_pp.h"
 #include "xiaomi_touch.h" // Referenced from xiaomi_touch (1).h
 #include "UdfpsHandler.h"
 
@@ -479,10 +479,9 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
     }
 
-    // This is now the Single Source of Truth for clearing state
+    // Removed resetTouchState() from this method so it doesn't fight physical hardware
     void forceHbmCleanup(bool isFinalEnrollment = false) {
         disableHbm();
-        resetTouchState();
         setFodStatus(FOD_STATUS_OFF);
         
         if (isFinalEnrollment) {
@@ -500,7 +499,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 
                 if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_FEATURE, &fp_req) == 0) {
 #if defined(__KERNEL__)
-                    LOG(INFO) << "✅ FP display status reset to " << get_finger_print_status_name(FINGERPRINT_NONE);
+                    LOG(INFO) << "✅ FP display status reset to " << get_fingerprint_status_name(FINGERPRINT_NONE);
 #else
                     LOG(INFO) << "✅ FP display status reset to " << getFingerprintStatusName(FINGERPRINT_NONE);
 #endif
@@ -515,6 +514,70 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mIsScreenOnFod = false;
         mSamplesRemaining = 0;
         mIsFinalEnrollment = false;
+    }
+
+    void setFingerDown(bool pressed) {
+        if (mPendingCleanup.load()) return;
+        
+        bool screenOn = isScreenOn();
+        
+        if (screenOn && pressed) {
+            mIsScreenOnFod = true;
+            mAuthInProgress = true;
+            enableHbm();
+            if (!enrolling.load()) scheduleHbmTimeout(false);
+        }
+        
+        // Strictly tie 1001 to the physical press/release state
+        if (pressed) {
+            std::lock_guard<std::mutex> lock(touch_mutex_);
+            if (touch_fd_.get() >= 0) {
+                int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 1};
+                ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
+            }
+        } else {
+            resetTouchState(); // Sends 1001: 0 ONLY when finger actually lifts
+        }
+
+        if (!enrolling.load()) {
+            std::lock_guard<std::mutex> lock(disp_mutex_);
+            if (disp_fd_.get() >= 0) {
+                disp_local_hbm_req req;
+                req.base.flag = 0;
+                req.base.disp_id = MI_DISP_PRIMARY;
+                req.local_hbm_value = pressed ? LHBM_TARGET_BRIGHTNESS_WHITE_1000NIT
+                                              : LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
+                if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) == 0 && !pressed) {
+                    mHbmEnabled = false;
+                }
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(device_mutex_);
+            if (mDevice != nullptr) {
+                mDevice->extCmd(mDevice, COMMAND_FOD_PRESS_STATUS,
+                              pressed ? PARAM_FOD_PRESSED : PARAM_FOD_RELEASED);
+            }
+        }
+        
+        if (!enrolling.load()) setDispFpStatus(pressed ? AUTH_START : AUTH_STOP);
+        
+        mIsFingerDown = pressed;
+        
+        if (!pressed) {
+            mAuthInProgress = false;
+            mIsScreenOnFod = false;
+            mIsFinalEnrollment = false;
+            
+            if (mPendingCleanup.load()) {
+                mPendingCleanup = false;
+                enrolling.store(false);
+                mSamplesRemaining = 0;
+            }
+            
+            forceHbmCleanup(false);
+        }
     }
 
     void shutdownThreads() {
@@ -719,70 +782,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
         int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, value};
         ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
-    }
-
-    void setFingerDown(bool pressed) {
-        if (mPendingCleanup.load()) return;
-        
-        bool screenOn = isScreenOn();
-        
-        if (screenOn && pressed) {
-            mIsScreenOnFod = true;
-            mAuthInProgress = true;
-            enableHbm();
-            if (!enrolling.load()) scheduleHbmTimeout(false);
-        }
-        
-        // ONLY dispatch the 1001 down command if explicitly pressed.
-        // The release (1001: 0) is now completely owned by forceHbmCleanup.
-        if (pressed) {
-            std::lock_guard<std::mutex> lock(touch_mutex_);
-            if (touch_fd_.get() >= 0) {
-                int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 1};
-                ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
-            }
-        }
-
-        if (!enrolling.load()) {
-            std::lock_guard<std::mutex> lock(disp_mutex_);
-            if (disp_fd_.get() >= 0) {
-                disp_local_hbm_req req;
-                req.base.flag = 0;
-                req.base.disp_id = MI_DISP_PRIMARY;
-                req.local_hbm_value = pressed ? LHBM_TARGET_BRIGHTNESS_WHITE_1000NIT
-                                              : LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-                if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) == 0 && !pressed) {
-                    mHbmEnabled = false;
-                }
-            }
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(device_mutex_);
-            if (mDevice != nullptr) {
-                mDevice->extCmd(mDevice, COMMAND_FOD_PRESS_STATUS,
-                              pressed ? PARAM_FOD_PRESSED : PARAM_FOD_RELEASED);
-            }
-        }
-        
-        if (!enrolling.load()) setDispFpStatus(pressed ? AUTH_START : AUTH_STOP);
-        
-        mIsFingerDown = pressed;
-        
-        // When lifted, route immediately through forceHbmCleanup
-        if (!pressed) {
-            mAuthInProgress = false;
-            mIsScreenOnFod = false;
-            mIsFinalEnrollment = false;
-            
-            if (mPendingCleanup.load()) {
-                mPendingCleanup = false;
-                enrolling.store(false);
-                mSamplesRemaining = 0;
-            }
-            
-            forceHbmCleanup(false);
-        }
     }
 };
 
