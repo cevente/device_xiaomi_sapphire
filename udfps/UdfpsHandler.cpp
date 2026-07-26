@@ -197,24 +197,10 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             mSamplesRemaining = 0;
             mIsFingerDown = false;
             forceHbmCleanup(wasFinalEnrollment);
-            resetTouchState();
-            setFodStatus(FOD_STATUS_OFF);
             return;
         }
         
         setFingerDown(false);
-        
-        if (!mPendingCleanup.load()) {
-            mAuthInProgress = false;
-            mIsScreenOnFod = false;
-            mHbmStuck = false;
-            mIsFinalEnrollment = false;
-            
-            if (!enrolling.load()) {
-                resetTouchState();
-                setFodStatus(FOD_STATUS_OFF);
-            }
-        }
     }
 
     void onAcquired(int32_t result, int32_t vendorCode) override {
@@ -227,30 +213,15 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     }
                     return;
                 } else {
-                    disableHbm();
-                    forceHbmCleanup(false);
-                    resetTouchState();
-                    setFodStatus(FOD_STATUS_OFF);
                     setDispFpStatus(ENROLL_STOP);
-                    mAuthInProgress = false;
-                    mIsScreenOnFod = false;
+                    forceHbmCleanup(false);
                     return;
                 }
             }
             
             if (mPendingCleanup.load()) return;
             
-            mAuthInProgress = false;
-            mIsScreenOnFod = false;
-            setFingerDown(false);
-            mPendingCleanup = false;
-            mHbmStuck = false;
-            mIsFinalEnrollment = false;
-            
-            disableHbm();
             forceHbmCleanup(false);
-            resetTouchState();
-            setFodStatus(FOD_STATUS_OFF);
             
             if (!enrolling.load()) {
                 setDispFpStatus(FINGERPRINT_NONE);
@@ -297,29 +268,14 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void postEnroll() override {
         setDispFpStatus(ENROLL_STOP);
         enrolling.store(false);
-        mPendingCleanup = false;
-        mHbmStuck = false;
-        mSamplesRemaining = 0;
-        mIsFinalEnrollment = false;
-        disableHbm();
-        resetTouchState();
-        setFodStatus(FOD_STATUS_OFF);
+        forceHbmCleanup(false);
         setDispFpStatus(FINGERPRINT_NONE);
     }
 
     void cancel() override {
         enrolling.store(false);
-        mAuthInProgress = false;
-        mIsScreenOnFod = false;
-        mPendingCleanup = false;
-        mSamplesRemaining = 0;
-        mIsFinalEnrollment = false;
-        mIsFingerDown = false;
-        mHbmStuck = false;
         setDispFpStatus(FINGERPRINT_NONE);
-        disableHbm();
-        resetTouchState();
-        setFodStatus(FOD_STATUS_OFF);
+        forceHbmCleanup(false);
     }
 
   private:
@@ -454,7 +410,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
     }
 
-    // Restore sysfs brightness read - prevents blocking during suspend
     int getBrightness() {
         android::base::unique_fd fd(open(BRIGHTNESS_PATH, O_RDONLY));
         if (fd.get() < 0) return -1;
@@ -476,7 +431,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
                 LOG(ERROR) << "Failed to reset touch state";
             } else {
-                LOG(INFO) << "✅ Touch state reset (FOD disabled)";
+                LOG(INFO) << "✅ Touch state reset (1001: 0)";
             }
         }
     }
@@ -511,30 +466,20 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     mIsFinalEnrollment = false;
                     enrolling.store(false);
                     mSamplesRemaining = 0;
-                    mIsFingerDown = false;
-                    mAuthInProgress = false;
-                    mIsScreenOnFod = false;
                     
-                    disableHbm();
                     forceHbmCleanup(true);
-                    resetTouchState();
-                    setFodStatus(FOD_STATUS_OFF);
                     setDispFpStatus(FINGERPRINT_NONE);
                     return;
                 }
                 
                 if (!mPendingCleanup.load() && !enrolling.load()) {
-                    disableHbm();
-                    resetTouchState();
-                    setFodStatus(FOD_STATUS_OFF);
-                    mIsFingerDown = false;
-                    mAuthInProgress = false;
-                    mIsScreenOnFod = false;
+                    forceHbmCleanup(false);
                 }
             });
         }
     }
 
+    // This is now the Single Source of Truth for clearing state
     void forceHbmCleanup(bool isFinalEnrollment = false) {
         disableHbm();
         resetTouchState();
@@ -555,7 +500,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 
                 if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_FEATURE, &fp_req) == 0) {
 #if defined(__KERNEL__)
-                    LOG(INFO) << "✅ FP display status reset to " << get_fingerprint_status_name(FINGERPRINT_NONE);
+                    LOG(INFO) << "✅ FP display status reset to " << get_finger_print_status_name(FINGERPRINT_NONE);
 #else
                     LOG(INFO) << "✅ FP display status reset to " << getFingerprintStatusName(FINGERPRINT_NONE);
 #endif
@@ -588,7 +533,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         if (screenThread_.joinable()) screenThread_.join();
     }
 
-    // Restore polling logic for screen state monitoring
     void screenStateMonitorThread() {
         LOG(INFO) << "Screen state monitor thread started (sysfs polling)";
         int lastState = -1;
@@ -605,8 +549,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     } else if (currentState == 1 && isFpcFod) {
                         LOG(INFO) << "📱 Screen went ON";
                         if (!enrolling.load() && !mPendingCleanup && !mAuthInProgress.load()) {
-                            resetTouchState();
-                            setFodStatus(FOD_STATUS_OFF);
+                            forceHbmCleanup(false);
                         }
                     }
                     lastState = currentState;
@@ -655,8 +598,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                         enrolling.store(false);
                         mSamplesRemaining = 0;
                         forceHbmCleanup(wasFinalEnrollment);
-                        resetTouchState();
-                        setFodStatus(FOD_STATUS_OFF);
                         continue;
                     }
                     
@@ -669,10 +610,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                         } else {
                             std::lock_guard<std::mutex> lock(device_mutex_);
                             if (mDevice != nullptr) mDevice->extCmd(mDevice, COMMAND_FOD_PRESS_STATUS, PARAM_FOD_RELEASED);
-                            disableHbm();
                             forceHbmCleanup(false);
-                            resetTouchState();
-                            setFodStatus(FOD_STATUS_OFF);
                         }
                         continue;
                     }
@@ -684,8 +622,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                         } else {
                             setFingerDown(false);
                             if (!enrolling.load() && !mPendingCleanup.load()) {
-                                resetTouchState();
-                                setFodStatus(FOD_STATUS_OFF);
+                                forceHbmCleanup(false);
                             }
                         }
                     }
@@ -708,14 +645,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                             enrolling.store(false);
                             mSamplesRemaining = 0;
                             forceHbmCleanup(wasFinalEnrollment);
-                            resetTouchState();
-                            setFodStatus(FOD_STATUS_OFF);
                         } else {
                             setFingerDown(false);
-                            if (!enrolling.load() && !mPendingCleanup.load()) {
-                                resetTouchState();
-                                setFodStatus(FOD_STATUS_OFF);
-                            }
                         }
                     }
                 }
@@ -802,10 +733,12 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             if (!enrolling.load()) scheduleHbmTimeout(false);
         }
         
-        {
+        // ONLY dispatch the 1001 down command if explicitly pressed.
+        // The release (1001: 0) is now completely owned by forceHbmCleanup.
+        if (pressed) {
             std::lock_guard<std::mutex> lock(touch_mutex_);
             if (touch_fd_.get() >= 0) {
-                int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, pressed ? 1 : 0};
+                int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 1};
                 ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
             }
         }
@@ -836,6 +769,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         
         mIsFingerDown = pressed;
         
+        // When lifted, route immediately through forceHbmCleanup
         if (!pressed) {
             mAuthInProgress = false;
             mIsScreenOnFod = false;
@@ -848,8 +782,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             }
             
             forceHbmCleanup(false);
-            resetTouchState();
-            setFodStatus(FOD_STATUS_OFF);
         }
     }
 };
