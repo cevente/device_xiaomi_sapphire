@@ -82,6 +82,24 @@
     <!-- Whether to ignore RSSNR signal level -->
     <bool name="config_ignoreRssnrSignalLevel">true</bool>
 
+    <!-- Whether pocket mode light sensor is supported -->
+    <bool name="config_pocketModeLightSensorSupported">true</bool>
+
+    <!-- Whether pocket mode is supported -->
+    <bool name="config_pocketModeSupported">true</bool>
+
+    <!-- Whether pocket mode uses light sensor -->
+    <bool name="config_pocketUseLightSensor">false</bool>
+
+    <!-- Whether proximity check on FPS unlock is enabled -->
+    <bool name="config_proximityCheckOnFpsUnlock">true</bool>
+
+    <!-- Whether proximity check on wake is enabled -->
+    <bool name="config_proximityCheckOnWake">true</bool>
+
+    <!-- Whether proximity check on wake is enabled by default -->
+    <bool name="config_proximityCheckOnWakeEnabledByDefault">true</bool>
+
     <!-- Whether to disable safe media on volume up -->
     <bool name="config_safe_media_disable_on_volume_up">true</bool>
 
@@ -140,7 +158,7 @@
     <!-- ==================== INTEGERS ==================== -->
 
     <!-- AOD max refresh rate -->
-    <integer name="config_aodMaxRefreshRate">60</integer>
+    <integer name="config_aodMaxRefreshRate">30</integer>
 
     <!-- Audio notification volume default -->
     <integer name="config_audio_notif_vol_default">10</integer>
@@ -164,7 +182,7 @@
     <integer name="config_defaultPeakRefreshRate">120</integer>
 
     <!-- Default refresh rate for a given device -->
-    <integer name="config_defaultRefreshRate">60</integer>
+    <integer name="config_defaultRefreshRate">0</integer>
 
     <!-- Keyguard max refresh rate -->
     <integer name="config_keyguardMaxRefreshRate">60</integer>
@@ -697,7 +715,10 @@
 
     <!-- ==================== STRING ARRAYS ==================== -->
 
-     <!-- Disallowed apps in managed profile -->
+     <!-- Vendor specific proximity sensor name for Pocket Mode -->
+<string name="config_pocketJudgeVendorProximitySensorName" translatable="false">tmd2755 Proximity Sensor Wakeup</string>
+
+    <!-- Disallowed apps in managed profile -->
     <string-array name="disallowed_apps_managed_profile">
         <item>com.miui.mishare.connectivity</item>
     </string-array>
