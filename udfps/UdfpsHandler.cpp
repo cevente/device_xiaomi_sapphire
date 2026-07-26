@@ -468,10 +468,10 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             cleanupThread_.join();
         }
         cleanupThread_ = std::thread([this, isFinalEnrollment]() {
-            std::this_thread::sleep_for(std::chrono::milliseconds(270));
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
             
             if (isFinalEnrollment) {
-                LOG(INFO) << "⏰ Final enrollment timeout (270ms) - turning off HBM and disabling FOD";
+                LOG(INFO) << "⏰ Final enrollment timeout (300ms) - turning off HBM and disabling FOD";
                 mPendingCleanup = false;
                 mIsFinalEnrollment = false;
                 enrolling.store(false);
@@ -489,7 +489,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             }
             
             if (!mPendingCleanup.load() && !enrolling.load()) {
-                LOG(INFO) << "⏰ HBM timeout (270ms) - turning off HBM and disabling FOD";
+                LOG(INFO) << "⏰ HBM timeout (300ms) - turning off HBM and disabling FOD";
                 
                 disableHbm();
                 setFodStatus(FOD_STATUS_OFF);
