@@ -140,7 +140,7 @@
     <!-- ==================== INTEGERS ==================== -->
 
     <!-- AOD max refresh rate -->
-    <integer name="config_aodMaxRefreshRate">30</integer>
+    <integer name="config_aodMaxRefreshRate">60</integer>
 
     <!-- Audio notification volume default -->
     <integer name="config_audio_notif_vol_default">10</integer>
@@ -164,7 +164,7 @@
     <integer name="config_defaultPeakRefreshRate">120</integer>
 
     <!-- Default refresh rate for a given device -->
-    <integer name="config_defaultRefreshRate">0</integer>
+    <integer name="config_defaultRefreshRate">60</integer>
 
     <!-- Keyguard max refresh rate -->
     <integer name="config_keyguardMaxRefreshRate">60</integer>
