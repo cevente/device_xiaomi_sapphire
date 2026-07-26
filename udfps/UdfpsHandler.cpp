@@ -29,9 +29,9 @@
 #include <condition_variable>
 
 // Display and DRM Headers
-#include "mi_disp.h"
-#include "sde_drm.h"
-#include "msm_drm_pp.h"
+#include "display/drm/mi_disp.h"
+#include "display/drm/sde_drm.h"
+#include "display/drm/msm_drm_pp.h"
 #include "xiaomi_touch.h" // Referenced from xiaomi_touch (1).h
 #include "UdfpsHandler.h"
 
