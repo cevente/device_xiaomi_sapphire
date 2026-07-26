@@ -512,7 +512,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             cleanupThread_.join();
         }
         cleanupThread_ = std::thread([this]() {
-            std::this_thread::sleep_for(std::chrono::milliseconds(270));
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
             if (mHbmStuck.load() && mIsFingerDown.load()) {
                 LOG(INFO) << "💡 Force cleaning HBM stuck state";
                 disableHbm();
