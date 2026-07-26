@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Cedric Loste
+ * Copyright (C) 2026 Cedric Loste
  *
  * Based on original LineageOS UdfpsHandler
  * SPDX-License-Identifier: Apache-2.0
@@ -26,6 +26,7 @@
 #include <cstring>
 #include <mutex>
 #include <thread>
+#include <condition_variable>
 
 #include <display/drm/mi_disp.h>
 
@@ -55,21 +56,10 @@ using ::aidl::android::hardware::biometrics::fingerprint::AcquiredInfo;
 
 namespace {
 
-static bool readBool(int fd) {
-    char c;
-    int rc;
-
-    rc = pread(fd, &c, sizeof(char), 0);
-    if (rc != 1) {
-        LOG(ERROR) << "failed to read bool from fd, err: " << rc;
-        return false;
-    }
-
-    return c != '0';
-}
-
 static disp_event_resp* parseDispEvent(int fd) {
-    static char event_data[1024];
+    // thread_local ensures safety across multiple threads
+    // without destroying the memory when the function returns.
+    thread_local char event_data[1024];
     ssize_t size;
 
     memset(event_data, 0, sizeof(event_data));
@@ -92,18 +82,15 @@ static int open_ts_input() {
     int fd = -1;
     DIR *dir = opendir("/dev/input");
 
-    if (dir != NULL) {
+    if (dir != nullptr) {
         struct dirent *ent;
 
-        while ((ent = readdir(dir)) != NULL) {
+        while ((ent = readdir(dir)) != nullptr) {
             if (ent->d_type == DT_CHR) {
-                char absolute_path[PATH_MAX] = {0};
+                std::string absolute_path = std::string("/dev/input/") + ent->d_name;
                 char name[80] = {0};
 
-                strcpy(absolute_path, "/dev/input/");
-                strcat(absolute_path, ent->d_name);
-
-                fd = open(absolute_path, O_RDWR);
+                fd = open(absolute_path.c_str(), O_RDWR);
                 if (fd < 0) {
                     continue;
                 }
@@ -129,16 +116,18 @@ static int open_ts_input() {
 
 class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
   public:
-    XiaomiSm6225UdfpsHandler() : mDevice(nullptr), isFpcFod(false), mPendingCleanup(false), 
+    // Constructor initialization list matches declaration order
+    XiaomiSm6225UdfpsHandler() : mDevice(nullptr), mPendingCleanup(false), 
                                   mHbmStuck(false), mAuthInProgress(false), mIsScreenOnFod(false),
-                                  mSamplesRemaining(0), mIsFinalEnrollment(false), mHbmEnabled(false) {}
+                                  mSamplesRemaining(0), mIsFinalEnrollment(false), mHbmEnabled(false),
+                                  isFpcFod(false) {}
 
-    ~XiaomiSm6225UdfpsHandler() {
+    ~XiaomiSm6225UdfpsHandler() override {
         LOG(INFO) << "Destructor called, shutting down threads";
         shutdownThreads();
     }
 
-    void init(fingerprint_device_t* device) {
+    void init(fingerprint_device_t* device) override {
         LOG(INFO) << "Initializing UDFPS handler";
         
         mDevice = device;
@@ -167,7 +156,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         LOG(INFO) << "UDFPS handler initialized";
     }
 
-    void onFingerDown(uint32_t /*x*/, uint32_t /*y*/, float /*minor*/, float /*major*/) {
+    void onFingerDown(uint32_t /*x*/, uint32_t /*y*/, float /*minor*/, float /*major*/) override {
         LOG(INFO) << __func__ << " - Framework pointer DOWN";
         
         if (mPendingCleanup.load()) {
@@ -179,9 +168,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mAuthInProgress = true;
         mIsFinalEnrollment = false;
         
-        mFbDownTimeMs.store(std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
-
         if (isFpcFod) {
             setFodStatus(FOD_STATUS_ON);
         }
@@ -189,7 +175,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         setFingerDown(true);
     }
 
-    void onFingerUp() {
+    void onFingerUp() override {
         LOG(INFO) << __func__ << " - Framework pointer UP";
         
         if (mPendingCleanup.load()) {
@@ -221,7 +207,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
     }
 
-    void onAcquired(int32_t result, int32_t vendorCode) {
+    void onAcquired(int32_t result, int32_t vendorCode) override {
         LOG(INFO) << __func__ << " result: " << result << " vendorCode: " << vendorCode;
         
         if (static_cast<AcquiredInfo>(result) == AcquiredInfo::GOOD) {
@@ -231,7 +217,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 LOG(INFO) << "📝 Enrollment capture GOOD - turning off HBM and disabling FOD";
                 bool isFinal = (mSamplesRemaining.load() == 0);
                 if (isFinal) {
-                    LOG(INFO) << "📝 Final enrollment capture - will use 270ms timeout for cleanup";
+                    LOG(INFO) << "📝 Final enrollment capture - will use 300ms timeout for cleanup";
                     if (mIsFingerDown.load()) {
                         scheduleHbmTimeout(true);
                     }
@@ -297,7 +283,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             LOG(INFO) << "📝 FINAL enrollment scan - samples_remaining = 0";
             mIsFinalEnrollment = true;
             if (mIsFingerDown.load()) {
-                LOG(INFO) << "📝 Finger still down - will use 270ms timeout for cleanup";
+                LOG(INFO) << "📝 Finger still down - will use 300ms timeout for cleanup";
             }
         } else {
             LOG(INFO) << "📝 Enrollment scan " << enrollmentId 
@@ -305,7 +291,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
     }
 
-    void preEnroll() {
+    void preEnroll() override {
         LOG(INFO) << __func__;
         mPendingCleanup = false;
         mHbmStuck = false;
@@ -315,7 +301,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         setDispFpStatus(ENROLL_START);
     }
 
-    void enroll() {
+    void enroll() override {
         LOG(INFO) << __func__;
         enrolling.store(true);
         mSamplesRemaining = 0;
@@ -323,7 +309,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         setDispFpStatus(ENROLL_START);
     }
 
-    void postEnroll() {
+    void postEnroll() override {
         LOG(INFO) << __func__;
         setDispFpStatus(ENROLL_STOP);
         enrolling.store(false);
@@ -337,7 +323,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         setDispFpStatus(FINGERPRINT_NONE);
     }
 
-    void cancel() {
+    void cancel() override {
         LOG(INFO) << __func__;
         enrolling.store(false);
         mAuthInProgress = false;
@@ -370,17 +356,17 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     
     bool isFpcFod;
     
-    std::atomic<uint64_t> mFbDownTimeMs{0};
-
     std::mutex touch_mutex_;
     std::mutex disp_mutex_;
     std::mutex device_mutex_;
     std::mutex cleanup_mutex_;
+    std::condition_variable cleanup_cv_;
 
     std::thread fodThread_;
     std::thread dispThread_;
     std::thread screenThread_;
     std::thread cleanupThread_;
+    std::atomic<bool> cleanupThreadRunning{false};
 
     bool isFingerprintActive() {
         return enrolling.load() || 
@@ -463,63 +449,108 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void scheduleHbmTimeout(bool isFinalEnrollment = false) {
-        std::lock_guard<std::mutex> lock(cleanup_mutex_);
-        if (cleanupThread_.joinable()) {
-            cleanupThread_.join();
+        std::thread oldThread;
+        
+        {
+            std::lock_guard<std::mutex> lock(cleanup_mutex_);
+            if (cleanupThread_.joinable()) {
+                cleanupThreadRunning = false;
+                cleanup_cv_.notify_all();
+                oldThread = std::move(cleanupThread_);
+            }
         }
-        cleanupThread_ = std::thread([this, isFinalEnrollment]() {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        
+        if (oldThread.joinable()) {
+            oldThread.join();
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(cleanup_mutex_);
+            cleanupThreadRunning = true;
             
-            if (isFinalEnrollment) {
-                LOG(INFO) << "⏰ Final enrollment timeout (300ms) - turning off HBM and disabling FOD";
-                mPendingCleanup = false;
-                mIsFinalEnrollment = false;
-                enrolling.store(false);
-                mSamplesRemaining = 0;
-                mIsFingerDown = false;
-                mAuthInProgress = false;
-                mIsScreenOnFod = false;
+            cleanupThread_ = std::thread([this, isFinalEnrollment]() {
+                std::unique_lock<std::mutex> threadLock(cleanup_mutex_);
                 
-                disableHbm();
-                forceHbmCleanup(true);
-                setFodStatus(FOD_STATUS_OFF);
-                resetTouchState();
-                setDispFpStatus(FINGERPRINT_NONE);
-                return;
-            }
-            
-            if (!mPendingCleanup.load() && !enrolling.load()) {
-                LOG(INFO) << "⏰ HBM timeout (300ms) - turning off HBM and disabling FOD";
+                cleanup_cv_.wait_for(threadLock, std::chrono::milliseconds(300));
                 
-                disableHbm();
-                setFodStatus(FOD_STATUS_OFF);
-                resetTouchState();
-                mIsFingerDown = false;
-                mAuthInProgress = false;
-                mIsScreenOnFod = false;
+                if (!cleanupThreadRunning) {
+                    return;
+                }
                 
-            } else if (enrolling.load()) {
-                LOG(INFO) << "⏰ HBM timeout - enrollment active, waiting for onAcquired(GOOD)";
-            } else if (mPendingCleanup.load()) {
-                LOG(INFO) << "⏰ HBM timeout - deferred cleanup pending, keeping HBM on";
-            }
-        });
+                if (isFinalEnrollment) {
+                    LOG(INFO) << "⏰ Final enrollment timeout (300ms) - turning off HBM and disabling FOD";
+                    mPendingCleanup = false;
+                    mIsFinalEnrollment = false;
+                    enrolling.store(false);
+                    mSamplesRemaining = 0;
+                    mIsFingerDown = false;
+                    mAuthInProgress = false;
+                    mIsScreenOnFod = false;
+                    
+                    disableHbm();
+                    forceHbmCleanup(true);
+                    setFodStatus(FOD_STATUS_OFF);
+                    resetTouchState();
+                    setDispFpStatus(FINGERPRINT_NONE);
+                    return;
+                }
+                
+                if (!mPendingCleanup.load() && !enrolling.load()) {
+                    LOG(INFO) << "⏰ HBM timeout (300ms) - turning off HBM and disabling FOD";
+                    
+                    disableHbm();
+                    setFodStatus(FOD_STATUS_OFF);
+                    resetTouchState();
+                    mIsFingerDown = false;
+                    mAuthInProgress = false;
+                    mIsScreenOnFod = false;
+                    
+                } else if (enrolling.load()) {
+                    LOG(INFO) << "⏰ HBM timeout - enrollment active, waiting for onAcquired(GOOD)";
+                } else if (mPendingCleanup.load()) {
+                    LOG(INFO) << "⏰ HBM timeout - deferred cleanup pending, keeping HBM on";
+                }
+            });
+        }
     }
 
     void scheduleHbmCleanup() {
-        std::lock_guard<std::mutex> lock(cleanup_mutex_);
-        if (cleanupThread_.joinable()) {
-            cleanupThread_.join();
-        }
-        cleanupThread_ = std::thread([this]() {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            if (mHbmStuck.load() && mIsFingerDown.load()) {
-                LOG(INFO) << "💡 Force cleaning HBM stuck state";
-                disableHbm();
-                forceHbmCleanup(false);
-                mHbmStuck = false;
+        std::thread oldThread;
+        
+        {
+            std::lock_guard<std::mutex> lock(cleanup_mutex_);
+            if (cleanupThread_.joinable()) {
+                cleanupThreadRunning = false;
+                cleanup_cv_.notify_all();
+                oldThread = std::move(cleanupThread_);
             }
-        });
+        }
+        
+        if (oldThread.joinable()) {
+            oldThread.join();
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(cleanup_mutex_);
+            cleanupThreadRunning = true;
+            
+            cleanupThread_ = std::thread([this]() {
+                std::unique_lock<std::mutex> threadLock(cleanup_mutex_);
+                
+                cleanup_cv_.wait_for(threadLock, std::chrono::milliseconds(300));
+                
+                if (!cleanupThreadRunning) {
+                    return;
+                }
+                
+                if (mHbmStuck.load() && mIsFingerDown.load()) {
+                    LOG(INFO) << "💡 Force cleaning HBM stuck state";
+                    disableHbm();
+                    forceHbmCleanup(false);
+                    mHbmStuck = false;
+                }
+            });
+        }
     }
 
     void forceHbmCleanup(bool isFinalEnrollment = false) {
@@ -584,11 +615,10 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     int getBrightness() {
-        int fd = open(BRIGHTNESS_PATH, O_RDONLY);
-        if (fd < 0) return -1;
+        android::base::unique_fd fd(open(BRIGHTNESS_PATH, O_RDONLY));
+        if (fd.get() < 0) return -1;
         char buf[12];
-        ssize_t len = read(fd, buf, sizeof(buf) - 1);
-        close(fd);
+        ssize_t len = read(fd.get(), buf, sizeof(buf) - 1);
         if (len <= 0) return -1;
         buf[len] = '\0';
         return atoi(buf);
@@ -624,6 +654,17 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
     void shutdownThreads() {
         isRunning.store(false);
+        
+        {
+            std::lock_guard<std::mutex> lock(cleanup_mutex_);
+            cleanupThreadRunning = false;
+            cleanup_cv_.notify_all();
+        }
+        
+        if (cleanupThread_.joinable()) {
+            cleanupThread_.join();
+        }
+        
         if (fodThread_.joinable()) {
             fodThread_.join();
         }
@@ -632,9 +673,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
         if (screenThread_.joinable()) {
             screenThread_.join();
-        }
-        if (cleanupThread_.joinable()) {
-            cleanupThread_.join();
         }
     }
 
@@ -654,8 +692,10 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             return;
         }
 
+        android::base::unique_fd touchFd(fd);
+
         struct pollfd tsPoll = {
-            .fd = fd,
+            .fd = touchFd.get(),
             .events = POLLIN,
             .revents = 0,
         };
@@ -674,18 +714,18 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             if (rc == 0) continue;
 
             if (tsPoll.revents & POLLIN) {
-                ssize_t bytesRead = read(fd, &ev, sizeof(struct input_event));
+                ssize_t bytesRead = read(touchFd.get(), &ev, sizeof(struct input_event));
                 
                 if (bytesRead < (ssize_t)sizeof(struct input_event)) {
                     continue;
                 }
 
-                bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
                 bool screenOn = isScreenOn();
                 bool fpActive = isFingerprintActive();
                 
                 if (ev.type == EV_KEY && ev.code == 0x0152) {
                     bool pressed = (ev.value == 1);
+                    bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
                     
                     if (!isScreenOffEnabled && !screenOn) {
                         continue;
@@ -795,15 +835,14 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             }
         }
 
-        close(fd);
         LOG(INFO) << "Native input event monitor thread stopped";
     }
 
     void displayEventMonitorThread() {
         LOG(INFO) << "Display event monitor thread started";
         
-        int fd = open(DISP_FEATURE_PATH, O_RDWR);
-        if (fd < 0) {
+        android::base::unique_fd fd(open(DISP_FEATURE_PATH, O_RDWR));
+        if (fd.get() < 0) {
             LOG(ERROR) << "Failed to open " << DISP_FEATURE_PATH 
                        << ", error: " << strerror(errno);
             return;
@@ -813,14 +852,13 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         req.base.flag = 0;
         req.base.disp_id = MI_DISP_PRIMARY;
         req.type = MI_DISP_EVENT_FOD;
-        if (ioctl(fd, MI_DISP_IOCTL_REGISTER_EVENT, &req) < 0) {
+        if (ioctl(fd.get(), MI_DISP_IOCTL_REGISTER_EVENT, &req) < 0) {
             LOG(ERROR) << "Failed to register for display events: " << strerror(errno);
-            close(fd);
             return;
         }
 
         struct pollfd dispEventPoll = {
-            .fd = fd,
+            .fd = fd.get(),
             .events = POLLIN,
             .revents = 0,
         };
@@ -847,7 +885,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
             dispEventPoll.revents = 0;
 
-            disp_event_resp* response = parseDispEvent(fd);
+            disp_event_resp* response = parseDispEvent(fd.get());
             if (response == nullptr) {
                 continue;
             }
@@ -868,7 +906,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             }
         }
 
-        close(fd);
         LOG(INFO) << "Display event monitor thread stopped";
     }
 
