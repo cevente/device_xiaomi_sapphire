@@ -222,15 +222,18 @@
          For example, no higher refresh rate if
              display brightness <= disp0 && ambient brightness <= amb0
              || display brightness <= disp1 && ambient brightness <= amb1 -->
-    <integer-array name="config_brightnessThresholdsOfPeakRefreshRate">
-        <item>10</item> <!-- 33% UI brightness -->
-        <item>14</item> <!-- 40% UI brightness -->
-    </integer-array>
-    <integer-array name="config_ambientThresholdsOfPeakRefreshRate">
-        <item>-1</item>
-        <item>20</item>
-    </integer-array>
-
+<integer-array name="config_brightnessThresholdsOfPeakRefreshRate">
+    <item>8</item>   <!-- Very dim: 8/255 (~3% brightness) -->
+    <item>12</item>  <!-- Dim: 12/255 (~5% brightness) -->
+    <item>20</item>  <!-- Low: 20/255 (~8% brightness) -->
+    <item>35</item>  <!-- Moderate-low: 35/255 (~14% brightness) -->
+</integer-array>
+<integer-array name="config_ambientThresholdsOfPeakRefreshRate">
+    <item>-1</item>  <!-- Any ambient -->
+    <item>5</item>   <!-- Very dark: ≤5 lux -->
+    <item>15</item>  <!-- Dark room: ≤15 lux -->
+    <item>30</item>  <!-- Dim room: ≤30 lux -->
+</integer-array>
     <!-- Default refresh rate in the zone defined by brightness and ambient thresholds.
          If non-positive, then the refresh rate is unchanged even if thresholds are configured. -->
     <integer name="config_defaultRefreshRateInZone">120</integer>
