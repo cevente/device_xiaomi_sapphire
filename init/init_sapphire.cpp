@@ -89,7 +89,7 @@ void vendor_load_properties() {
     // Set hardware revision
     property_override("ro.boot.hardware.revision", GetProperty("ro.boot.hwversion", "").c_str());
 
-    // Set dalvik heap configuration
+    // Khaje (Snapdragon 680/685) optimized heap configuration
     std::string heapstartsize, heapgrowthlimit, heapsize, heapminfree,
 			heapmaxfree, heaptargetutilization;
 
@@ -97,20 +97,20 @@ void vendor_load_properties() {
     sysinfo(&sys);
 
     if (sys.totalram > 6144ull * 1024 * 1024) {
-        // from - phone-xhdpi-8192-dalvik-heap.mk
-        heapstartsize = "16m";
+        // Khaje 8GB variant - more aggressive for multitasking
+        heapstartsize = "24m";
         heapgrowthlimit = "384m";
         heapsize = "512m";
-        heaptargetutilization = "0.5";
-        heapminfree = "8m";
-        heapmaxfree = "16m";
+        heaptargetutilization = "0.6";
+        heapminfree = "4m";
+        heapmaxfree = "32m";
     } else if (sys.totalram > 4096ull * 1024 * 1024) {
-        // from - phone-xhdpi-6144-dalvik-heap.mk
-        heapstartsize = "12m";
-        heapgrowthlimit = "320m";
-        heapsize = "448m";
-        heaptargetutilization = "0.45";
-        heapminfree = "8m";
+        // Khaje 6GB variant - balanced for performance
+        heapstartsize = "16m";
+        heapgrowthlimit = "256m";
+        heapsize = "384m";
+        heaptargetutilization = "0.55";
+        heapminfree = "4m";
         heapmaxfree = "16m";
     }
 
