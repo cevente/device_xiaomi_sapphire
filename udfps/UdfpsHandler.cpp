@@ -371,7 +371,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 LOG(ERROR) << "Failed to enable HBM: " << strerror(errno);
             } else {
                 mHbmEnabled = true;
-                LOG(INFO) << "✅ HBM enabled: " << getLhbmValueName(req.local_hbm_value);
+                LOG(INFO) << "✅ HBM enabled";
             }
         }
     }
@@ -389,7 +389,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 LOG(ERROR) << "Failed to disable HBM: " << strerror(errno);
             } else {
                 mHbmEnabled = false;
-                LOG(INFO) << "✅ HBM disabled: " << getLhbmValueName(req.local_hbm_value);
+                LOG(INFO) << "✅ HBM disabled";
             }
         }
     }
@@ -406,6 +406,20 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
     bool isScreenOn() {
         return getBrightness() > 0;
+    }
+
+    // Restore full touch matrix after FOD using Touch_Active_MODE
+    void setTouchActiveMode() {
+        std::lock_guard<std::mutex> lock(touch_mutex_);
+        if (touch_fd_.get() < 0) return;
+
+        // Touch_Active_MODE is defined in xiaomi_touch.h
+        int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Active_MODE, 1};
+        if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
+            LOG(ERROR) << "Failed to set Touch_Active_MODE: " << strerror(errno);
+        } else {
+            LOG(INFO) << "✅ Panel matrix expanded (Touch_Active_MODE set)";
+        }
     }
 
     void scheduleHbmTimeout(bool isFinalEnrollment = false) {
@@ -451,13 +465,14 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
     }
 
-    // CRITICAL FIX: Only disable FOD when finger is physically lifted
+    // Cleanup - disable FOD and restore touch matrix
     void forceHbmCleanup(bool isFinalEnrollment = false) {
         disableHbm();
         
-        // Only disable FOD and clean up if the finger is physically lifted
+        // Only disable FOD and restore touch matrix if finger is lifted
         if (!mIsFingerDown.load()) {
             setFodStatus(FOD_STATUS_OFF);
+            setTouchActiveMode();  // Restore full touch matrix
         }
         
         if (isFinalEnrollment) {
@@ -501,7 +516,13 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             if (!enrolling.load()) scheduleHbmTimeout(false);
         }
         
-        // REMOVED: THP_FOD_DOWNUP_CTL (1001) - FocalTech driver rejects it
+        // IMPORTANT: Do NOT use THP_FOD_DOWNUP_CTL (1001)
+        // FocalTech driver rejects it with "fts mode not support:1001"
+        // Use Touch_Fod_Enable (mode 0) instead
+        
+        if (pressed) {
+            setFodStatus(FOD_STATUS_ON);
+        }
 
         if (!enrolling.load()) {
             std::lock_guard<std::mutex> lock(disp_mutex_);
@@ -613,10 +634,11 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     bool pressed = (ev.value == 1);
                     bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
                     
-                    // CRITICAL: Physical finger release - disable FOD mode
+                    // Physical finger release - DISABLE FOD AND RESTORE TOUCH MATRIX
                     if (!pressed) {
-                        LOG(INFO) << "🖐️ Physical finger UP - disabling FOD";
+                        LOG(INFO) << "🖐️ Physical finger UP - disabling FOD and restoring touch matrix";
                         setFodStatus(FOD_STATUS_OFF);
+                        setTouchActiveMode();  // Restore full touch matrix
                     }
                     
                     if (!screenOn && !isScreenOffEnabled) continue;
@@ -751,11 +773,9 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
     }
 
-    // CRITICAL FIX: Block FOD_STATUS_ON when screen is awake
+    // PRIMARY FOD CONTROL - ONLY USE THIS FOR FOD
     void setFodStatus(int value) {
-        // Prevent re-arming FOD mode if the screen is already awake.
-        // Screen-On FOD uses the standard touch matrix. Forcing this 
-        // to ON while awake will kill standard UI touch input.
+        // Block FOD_STATUS_ON when screen is awake
         if (value == FOD_STATUS_ON && isScreenOn()) {
             LOG(INFO) << "🚫 Blocked FOD_STATUS_ON - screen is already awake";
             return;
@@ -764,11 +784,24 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         std::lock_guard<std::mutex> lock(touch_mutex_);
         if (touch_fd_.get() < 0) return;
 
+        // ONLY use Touch_Fod_Enable (mode 0) - THIS WORKS
+        // Do NOT use THP_FOD_DOWNUP_CTL (1001) - FocalTech rejects it
         int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, value};
         if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
             LOG(ERROR) << "Failed to set FOD status to " << value << ": " << strerror(errno);
         } else {
             LOG(INFO) << "✅ FOD status set to " << (value ? "ON" : "OFF");
+        }
+    }
+
+    const char* getFingerprintStatusName(int status) {
+        switch(status) {
+            case FINGERPRINT_NONE: return "NONE";
+            case AUTH_START: return "AUTH_START";
+            case AUTH_STOP: return "AUTH_STOP";
+            case ENROLL_START: return "ENROLL_START";
+            case ENROLL_STOP: return "ENROLL_STOP";
+            default: return "UNKNOWN";
         }
     }
 };
