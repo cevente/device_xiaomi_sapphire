@@ -134,7 +134,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
         fodThread_ = std::thread([this]() { fodPressMonitorThread(); });
         dispThread_ = std::thread([this]() { displayEventMonitorThread(); });
-        drmEventThread_ = std::thread([this]() { drmEventMonitorThread(); });
         
         if (isFpcFod) {
             screenThread_ = std::thread([this]() { screenStateMonitorThread(); });
@@ -180,7 +179,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             mIsFingerDown = false;
             forceHbmCleanup(false);
             setFodStatus(FOD_STATUS_OFF);
-            setTouchActiveMode();
         }
         
         setDispFpStatus(FINGERPRINT_NONE);
@@ -224,7 +222,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             forceHbmCleanup(false);
             setDispFpStatus(FINGERPRINT_NONE);
             setFodStatus(FOD_STATUS_OFF);
-            setTouchActiveMode();
             
             return;
         }
@@ -305,7 +302,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
     std::thread fodThread_;
     std::thread dispThread_;
-    std::thread drmEventThread_;
     std::thread screenThread_;
     std::thread cleanupThread_;
     std::atomic<bool> cleanupThreadRunning{false};
@@ -322,12 +318,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             drm_msm_display_hint hint = {};
             hint.hint_flags = DRM_MSM_DISPLAY_EARLY_WAKEUP_HINT;
             ioctl(drm_fd_.get(), DRM_IOCTL_MSM_DISPLAY_HINT, &hint);
-        }
-    }
-
-    void checkDimmingStatus() {
-        if (drm_fd_.get() >= 0) {
-            drm_msm_backlight_info bl_info = {};
         }
     }
 
@@ -349,8 +339,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
     void enableHbm() {
         if (mHbmEnabled.load()) return;
-        
-        checkDimmingStatus();
 
         std::lock_guard<std::mutex> lock(disp_mutex_);
         if (disp_fd_.get() >= 0) {
@@ -389,14 +377,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
     bool isScreenOn() {
         return getBrightness() > 0;
-    }
-
-    void setTouchActiveMode() {
-        std::lock_guard<std::mutex> lock(touch_mutex_);
-        if (touch_fd_.get() < 0) return;
-
-        int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Active_MODE, 1};
-        ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
     }
 
     void scheduleHbmTimeout(bool isFinalEnrollment = false) {
@@ -444,7 +424,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void forceHbmCleanup(bool isFinalEnrollment = false) {
         disableHbm();
         setFodStatus(FOD_STATUS_OFF);
-        setTouchActiveMode();
         
         if (isFinalEnrollment) {
             std::lock_guard<std::mutex> lock(disp_mutex_);
@@ -540,7 +519,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         if (cleanupThread_.joinable()) cleanupThread_.join();
         if (fodThread_.joinable()) fodThread_.join();
         if (dispThread_.joinable()) dispThread_.join();
-        if (drmEventThread_.joinable()) drmEventThread_.join();
         if (screenThread_.joinable()) screenThread_.join();
     }
 
@@ -596,7 +574,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     
                     if (!pressed) {
                         setFodStatus(FOD_STATUS_OFF);
-                        setTouchActiveMode();
                     }
                     
                     if (!screenOn && !isScreenOffEnabled) continue;
@@ -670,31 +647,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
     }
 
-    void drmEventMonitorThread() {
-        if (drm_fd_.get() < 0) return;
-        
-        struct drm_msm_event_req drm_req = {};
-        drm_req.object_type = 0; 
-        
-        drm_req.event = DRM_EVENT_CRTC_POWER;
-        ioctl(drm_fd_.get(), DRM_IOCTL_MSM_REGISTER_EVENT, &drm_req);
-        
-        drm_req.event = DRM_EVENT_DIMMING_BL;
-        ioctl(drm_fd_.get(), DRM_IOCTL_MSM_REGISTER_EVENT, &drm_req);
-
-        struct pollfd drmPoll = { .fd = drm_fd_.get(), .events = POLLIN, .revents = 0 };
-        
-        while (isRunning.load()) {
-            int rc = poll(&drmPoll, 1, 1000);
-            if (rc <= 0) continue;
-            
-            if (drmPoll.revents & POLLIN) {
-                char buffer[1024];
-                read(drm_fd_.get(), buffer, sizeof(buffer));
-            }
-        }
-    }
-
     void displayEventMonitorThread() {
         if (disp_fd_.get() < 0) return;
 
@@ -738,7 +690,19 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         if (touch_fd_.get() < 0) return;
 
         int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, value};
-        ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf);
+        
+        // ONLY CHANGE: Retry on transient errors with small delay
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) == 0) {
+                return;
+            }
+            LOG(WARNING) << "setFodStatus(" << value << ") attempt " << attempt 
+                        << " failed: " << strerror(errno);
+            if (errno != EBUSY && errno != EAGAIN) {
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
     }
 
     const char* getFingerprintStatusName(int status) {
