@@ -116,7 +116,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     XiaomiSm6225UdfpsHandler() : mDevice(nullptr), mPendingCleanup(false), 
                                   mHbmStuck(false), mAuthInProgress(false), mIsScreenOnFod(false),
                                   mSamplesRemaining(0), mIsFinalEnrollment(false), mHbmEnabled(false),
-                                  isFpcFod(false), mFodDisabledAttempts(0) {}
+                                  isFpcFod(false) {}
 
     ~XiaomiSm6225UdfpsHandler() override {
         shutdownThreads();
@@ -150,7 +150,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mHbmStuck = false;
         mAuthInProgress = true;
         mIsFinalEnrollment = false;
-        mFodDisabledAttempts = 0;
         
         if (isFpcFod) {
             setFodStatus(FOD_STATUS_ON);
@@ -292,7 +291,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::atomic<int32_t> mSamplesRemaining{0};
     std::atomic<bool> mIsFinalEnrollment{false};
     std::atomic<bool> mHbmEnabled{false};
-    std::atomic<int> mFodDisabledAttempts{0};
     
     bool isFpcFod;
     
@@ -424,21 +422,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void forceHbmCleanup(bool isFinalEnrollment = false) {
-        // First, aggressively disable FOD mode with retries
-        bool fodDisabled = false;
-        for (int attempt = 0; attempt < 10 && !fodDisabled; attempt++) {
-            fodDisabled = setFodStatusWithRetry(FOD_STATUS_OFF);
-            if (!fodDisabled && attempt < 9) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
-        }
-        
-        // Even if setFodStatus failed, try direct ioctl to force reset
-        if (!fodDisabled) {
-            LOG(WARNING) << "Force HBM cleanup: direct FOD disable failed after retries, attempting force reset";
-            directForceFodOff();
-        }
-        
+        // Use the cache buster to force kernel to sync with hardware
+        directForceFodOff();
         disableHbm();
         
         if (isFinalEnrollment) {
@@ -465,28 +450,63 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mIsScreenOnFod = false;
         mSamplesRemaining = 0;
         mIsFinalEnrollment = false;
-        mFodDisabledAttempts = 0;
     }
 
+    /**
+     * Cache Buster: Force kernel to sync FOD state with hardware
+     * 
+     * The kernel driver caches register values and skips I2C writes when it thinks
+     * the hardware is already in the correct state. This can lead to desynchronization
+     * where the kernel thinks FOD is OFF but the hardware is stuck in FOD mode.
+     * 
+     * This function toggles the state ON then OFF to force the kernel to actually
+     * write both states to the hardware, restoring synchronization.
+     */
     void directForceFodOff() {
-        // Direct write to touch device to force FOD off
         if (touch_fd_.get() < 0) return;
         
-        int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_OFF};
+        LOG(WARNING) << "Executing Cache Buster: Toggling FOD state to force kernel I2C register write";
+
+        // Step 1: Force the kernel state to ON.
+        // This forces the driver to write the 0x03 state to register 0xCF.
+        int bufOn[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_ON};
+        if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufOn) == 0) {
+            LOG(INFO) << "Cache Buster: Set FOD ON successfully";
+        } else {
+            LOG(WARNING) << "Cache Buster: Set FOD ON failed: " << strerror(errno);
+        }
         
-        // Try multiple times with increasing delays
-        for (int attempt = 0; attempt < 15; attempt++) {
-            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) == 0) {
-                LOG(INFO) << "Direct force FOD off succeeded on attempt " << attempt;
+        // Wait 15ms to ensure the hardware bus processes the ON command.
+        std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        
+        // Step 2: Force the kernel state to OFF.
+        // Because the cache is now ON, the kernel is forced to physically write
+        // the 0x01 state to register 0xCF, unbricking the touch IC.
+        int bufOff[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_OFF};
+        
+        for (int attempt = 0; attempt < 5; attempt++) {
+            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufOff) == 0) {
+                LOG(INFO) << "Cache Buster: Set FOD OFF succeeded on attempt " << attempt;
                 return;
             }
             int err = errno;
-            LOG(WARNING) << "Direct force FOD off attempt " << attempt << " failed: " << strerror(err);
+            LOG(WARNING) << "Cache Buster OFF attempt " << attempt << " failed: " << strerror(err);
             if (err != EBUSY && err != EAGAIN && err != EINTR) {
                 break;
             }
-            // Increasing backoff delay
+            // Exponential backoff: 5ms, 10ms, 20ms, 40ms, 80ms
             std::this_thread::sleep_for(std::chrono::milliseconds(5 * (attempt + 1)));
+        }
+        
+        // Step 3: Ultimate Failsafe (Xiaomi Touch Reset)
+        // If the specific FOD register is completely trashed, hit the global touch reset mode
+        // mapped in xiaomi_touch.h (RESET_MODE = 6)
+        LOG(WARNING) << "Cache Buster failed, attempting global touch panel RESET_MODE";
+        int bufReset[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, RESET_MODE, 1};
+        if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufReset) == 0) {
+            LOG(INFO) << "Touch panel RESET_MODE succeeded";
+        } else {
+            LOG(ERROR) << "Touch panel RESET_MODE failed: " << strerror(errno);
         }
     }
 
@@ -574,14 +594,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     if (currentState == 0 && isFpcFod && isScreenOffEnabled) {
                         setFodStatus(FOD_STATUS_ON);
                     } else if (currentState == 1 && isFpcFod) {
-                        // If screen turns on, ensure FOD is properly disabled
-                        // even if authentication is in progress (it might have completed)
-                        if (!enrolling.load()) {
-                            // Small delay to allow authentication to complete if in progress
-                            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                            if (!mAuthInProgress.load()) {
-                                forceHbmCleanup(false);
-                            }
+                        if (!enrolling.load() && !mPendingCleanup && !mAuthInProgress.load()) {
+                            forceHbmCleanup(false);
                         }
                     }
                     lastState = currentState;
@@ -591,46 +605,28 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
     }
 
-    bool setFodStatusWithRetry(int value) {
-        if (value == FOD_STATUS_ON && isScreenOn()) {
-            return true;
-        }
-
-        std::lock_guard<std::mutex> lock(touch_mutex_);
-        if (touch_fd_.get() < 0) return false;
-
-        int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, value};
-        
-        // Improved retry mechanism with increasing delays
-        for (int attempt = 0; attempt < 5; attempt++) {
-            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) == 0) {
-                mFodDisabledAttempts = 0;
-                return true;
-            }
-            int err = errno;
-            LOG(WARNING) << "setFodStatus(" << value << ") attempt " << attempt 
-                        << " failed: " << strerror(err);
-            
-            if (err != EBUSY && err != EAGAIN && err != EINTR) {
-                mFodDisabledAttempts++;
-                return false;
-            }
-            
-            // Exponential backoff: 5ms, 10ms, 20ms, 40ms, 80ms
-            int delay_ms = 5 * (1 << attempt);
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-        }
-        
-        mFodDisabledAttempts++;
-        return false;
-    }
-
     void setFodStatus(int value) {
         if (value == FOD_STATUS_ON && isScreenOn()) {
             return;
         }
 
-        setFodStatusWithRetry(value);
+        std::lock_guard<std::mutex> lock(touch_mutex_);
+        if (touch_fd_.get() < 0) return;
+
+        int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, value};
+        
+        // Retry on transient errors with increasing delays
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) == 0) {
+                return;
+            }
+            LOG(WARNING) << "setFodStatus(" << value << ") attempt " << attempt 
+                        << " failed: " << strerror(errno);
+            if (errno != EBUSY && errno != EAGAIN && errno != EINTR) {
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5 * (attempt + 1)));
+        }
     }
 
     void fodPressMonitorThread() {
@@ -660,9 +656,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     bool pressed = (ev.value == 1);
                     bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
                     
-                    // Always ensure FOD is disabled on finger up, even if we're in a cleanup state
                     if (!pressed) {
-                        // Directly disable FOD, don't rely on state flags
                         setFodStatus(FOD_STATUS_OFF);
                     }
                     
