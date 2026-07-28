@@ -639,10 +639,15 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
 
                 bool screenOn = isScreenOn();
                 bool fpActive = isFingerprintActive();
+                bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
+                
+                // Skip BTN_INFO events completely when screen is off and screen-off FOD is disabled
+                if (ev.type == EV_KEY && ev.code == BTN_INFO && !screenOn && !isScreenOffEnabled) {
+                    continue;
+                }
                 
                 if (ev.type == EV_KEY && ev.code == BTN_INFO) {
                     bool pressed = (ev.value == 1);
-                    bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
                     
                     if (!pressed) {
                         if (!mFingerUpSent.load()) {
