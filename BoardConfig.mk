@@ -10,8 +10,6 @@ include vendor/xiaomi/sapphire/BoardConfigVendor.mk
 DEVICE_PATH := device/xiaomi/sapphire
 KERNEL_PATH := $(DEVICE_PATH)-kernel
 
-TARGET_COMPILE_WITH_MSM_KERNEL := false
-
 BUILD_BROKEN_DUP_RULES := true
 BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true
 BUILD_BROKEN_INCORRECT_PARTITION_IMAGES := true
@@ -34,9 +32,6 @@ AB_OTA_PARTITIONS += \
     vendor \
     vendor_boot \
     vendor_dlkm
-
-# Media
-TARGET_USES_ION := true
 
 # Architecture
 TARGET_ARCH := arm64
@@ -151,7 +146,7 @@ BOARD_KERNEL_CMDLINE := \
 
 # Kernel prebuilt
 TARGET_KERNEL_ARCH := arm64
-# INLINE_KERNEL_BUILDING := false
+INLINE_KERNEL_BUILDING := true
 TARGET_KERNEL_HEADER_ARCH := arm64
 TARGET_KERNEL_VERSION := 5.15
 
