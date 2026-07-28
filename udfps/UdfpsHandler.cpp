@@ -16,8 +16,6 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <linux/input.h>
-#include <dirent.h>
 #include <limits.h>
 #include <sys/time.h>
 
@@ -57,6 +55,7 @@
 #define DISP_FEATURE_PATH "/dev/mi_display/disp_feature"
 #define BRIGHTNESS_PATH "/sys/class/backlight/panel0-backlight/brightness"
 #define DRM_DEV_PATH "/dev/dri/card0"
+#define FOD_PRESS_STATUS_PATH "/sys/class/touch/touch_dev/fod_press_status"
 
 using ::aidl::android::hardware::biometrics::fingerprint::AcquiredInfo;
 
@@ -77,39 +76,6 @@ static disp_event_resp* parseDispEvent(int fd) {
     }
 
     return reinterpret_cast<disp_event_resp*>(event_data);
-}
-
-static int open_ts_input() {
-    int fd = -1;
-    DIR *dir = opendir("/dev/input");
-
-    if (dir != nullptr) {
-        struct dirent *ent;
-
-        while ((ent = readdir(dir)) != nullptr) {
-            if (ent->d_type == DT_CHR) {
-                std::string absolute_path = std::string("/dev/input/") + ent->d_name;
-                char name[80] = {0};
-
-                fd = open(absolute_path.c_str(), O_RDWR);
-                if (fd < 0) {
-                    continue;
-                }
-
-                if (ioctl(fd, EVIOCGNAME(sizeof(name) - 1), &name) > 0) {
-                    if (strcmp(name, "fts_ts") == 0 || strcmp(name, "fts") == 0 || 
-                        strcmp(name, "goodix_ts") == 0 || strcmp(name, "NVTCapacitiveTouchScreen") == 0) {
-                        break;
-                    }
-                }
-
-                close(fd);
-                fd = -1;
-            }
-        }
-        closedir(dir);
-    }
-    return fd;
 }
 
 }  // anonymous namespace
@@ -612,115 +578,84 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     void fodPressMonitorThread() {
         int fd = -1;
         while (isRunning.load() && fd < 0) {
-            fd = open_ts_input();
-            if (fd < 0) std::this_thread::sleep_for(std::chrono::seconds(1));
+            fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
+            if (fd < 0) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
         }
         if (fd < 0) return;
 
-        android::base::unique_fd touchFd(fd);
-        struct pollfd tsPoll = { .fd = touchFd.get(), .events = POLLIN, .revents = 0 };
-        struct input_event ev;
-        int consecutiveErrors = 0;
+        android::base::unique_fd sysfsFd(fd);
+        struct pollfd fodPoll = { .fd = sysfsFd.get(), .events = POLLERR | POLLPRI, .revents = 0 };
+        char buf[2];
+        
+        // Do an initial read to clear any pending events before entering the loop
+        read(sysfsFd.get(), buf, sizeof(buf));
         
         while (isRunning.load()) {
-            int rc = poll(&tsPoll, 1, 1000);
-            if (rc < 0) {
-                consecutiveErrors++;
-                if (consecutiveErrors > 10) break;
-                continue;
-            }
-            consecutiveErrors = 0;
-            
-            if (rc == 0) continue;
+            int rc = poll(&fodPoll, 1, 1000);
+            if (rc <= 0) continue;
 
-            if (tsPoll.revents & POLLIN) {
-                ssize_t bytesRead = read(touchFd.get(), &ev, sizeof(struct input_event));
-                if (bytesRead < (ssize_t)sizeof(struct input_event)) continue;
+            if (fodPoll.revents & (POLLERR | POLLPRI)) {
+                // Seek back to the beginning of the file to read the new value
+                lseek(sysfsFd.get(), 0, SEEK_SET);
+                ssize_t bytesRead = read(sysfsFd.get(), buf, sizeof(buf));
+                if (bytesRead <= 0) continue;
 
+                bool pressed = (buf[0] == '1');
+                
                 bool screenOn = isScreenOn();
                 bool fpActive = isFingerprintActive();
                 bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
                 
-                // Skip BTN_INFO events completely when screen is off and screen-off FOD is disabled
-                if (ev.type == EV_KEY && ev.code == BTN_INFO && !screenOn && !isScreenOffEnabled) {
+                if (!pressed) {
+                    if (!mFingerUpSent.load()) {
+                        std::lock_guard<std::mutex> lock(touch_mutex_);
+                        int bufUp[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 0};
+                        ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufUp);
+                        mFingerUpSent = true;
+                    }
+                    setFodStatus(FOD_STATUS_OFF);
+                }
+                
+                if (!screenOn && !isScreenOffEnabled) continue;
+                
+                if (screenOn && pressed && !fpActive && !mPendingCleanup.load()) continue;
+                
+                mIsFingerDown = pressed;
+                
+                if (!pressed && mPendingCleanup.load()) {
+                    bool wasFinalEnrollment = mIsFinalEnrollment.load();
+                    mIsFinalEnrollment = false;
+                    mPendingCleanup = false;
+                    enrolling.store(false);
+                    mSamplesRemaining = 0;
+                    forceHbmCleanup(wasFinalEnrollment);
                     continue;
                 }
                 
-                if (ev.type == EV_KEY && ev.code == BTN_INFO) {
-                    bool pressed = (ev.value == 1);
-                    
-                    if (!pressed) {
-                        if (!mFingerUpSent.load()) {
-                            std::lock_guard<std::mutex> lock(touch_mutex_);
-                            int bufUp[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 0};
-                            ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufUp);
-                            mFingerUpSent = true;
-                        }
-                        setFodStatus(FOD_STATUS_OFF);
+                if (!screenOn && isScreenOffEnabled) {
+                    if (pressed) {
+                        setFodStatus(FOD_STATUS_ON);
+                        enableHbm();
+                        std::lock_guard<std::mutex> lock(device_mutex_);
+                        if (mDevice != nullptr) mDevice->extCmd(mDevice, COMMAND_FOD_PRESS_STATUS, PARAM_FOD_PRESSED);
+                    } else {
+                        std::lock_guard<std::mutex> lock(device_mutex_);
+                        if (mDevice != nullptr) mDevice->extCmd(mDevice, COMMAND_FOD_PRESS_STATUS, PARAM_FOD_RELEASED);
+                        forceHbmCleanup(false);
                     }
-                    
-                    if (!screenOn && !isScreenOffEnabled) continue;
-                    
-                    if (screenOn && pressed && !fpActive && !mPendingCleanup.load()) continue;
-                    
-                    mIsFingerDown = pressed;
-                    
-                    if (!pressed && mPendingCleanup.load()) {
-                        bool wasFinalEnrollment = mIsFinalEnrollment.load();
-                        mIsFinalEnrollment = false;
-                        mPendingCleanup = false;
-                        enrolling.store(false);
-                        mSamplesRemaining = 0;
-                        forceHbmCleanup(wasFinalEnrollment);
-                        continue;
-                    }
-                    
-                    if (!screenOn && isScreenOffEnabled) {
-                        if (pressed) {
-                            setFodStatus(FOD_STATUS_ON);
-                            enableHbm();
-                            std::lock_guard<std::mutex> lock(device_mutex_);
-                            if (mDevice != nullptr) mDevice->extCmd(mDevice, COMMAND_FOD_PRESS_STATUS, PARAM_FOD_PRESSED);
-                        } else {
-                            std::lock_guard<std::mutex> lock(device_mutex_);
-                            if (mDevice != nullptr) mDevice->extCmd(mDevice, COMMAND_FOD_PRESS_STATUS, PARAM_FOD_RELEASED);
-                            forceHbmCleanup(false);
-                        }
-                        continue;
-                    }
-                    
-                    if (screenOn) {
-                        if (pressed) {
-                            setFingerDown(true);
-                            if (!enrolling.load()) scheduleHbmTimeout(false);
-                        } else {
-                            setFingerDown(false);
-                            if (!enrolling.load() && !mPendingCleanup.load()) {
-                                forceHbmCleanup(false);
-                            }
-                        }
-                    }
+                    continue;
                 }
                 
-                if (screenOn && ev.type == EV_ABS && ev.code == ABS_MT_TRACKING_ID && ev.value >= 0) {
-                    if (fpActive && !mIsFingerDown.load() && !mPendingCleanup.load()) {
+                if (screenOn) {
+                    if (pressed) {
                         setFingerDown(true);
                         if (!enrolling.load()) scheduleHbmTimeout(false);
-                    }
-                }
-                
-                if (screenOn && ev.type == EV_ABS && ev.code == ABS_MT_TRACKING_ID && ev.value == -1) {
-                    if (mIsFingerDown.load()) {
-                        mIsFingerDown = false;
-                        if (mPendingCleanup.load()) {
-                            bool wasFinalEnrollment = mIsFinalEnrollment.load();
-                            mIsFinalEnrollment = false;
-                            mPendingCleanup = false;
-                            enrolling.store(false);
-                            mSamplesRemaining = 0;
-                            forceHbmCleanup(wasFinalEnrollment);
-                        } else {
-                            setFingerDown(false);
+                    } else {
+                        setFingerDown(false);
+                        if (!enrolling.load() && !mPendingCleanup.load()) {
+                            forceHbmCleanup(false);
                         }
                     }
                 }
