@@ -50,6 +50,7 @@
 #define TOUCH_MAGIC 'T'
 #define TOUCH_IOC_SET_CUR_VALUE _IO(TOUCH_MAGIC, SET_CUR_VALUE)
 #define TOUCH_IOC_GET_CUR_VALUE _IO(TOUCH_MAGIC, GET_CUR_VALUE)
+#define TOUCH_IOC_RESET_MODE _IO(TOUCH_MAGIC, RESET_MODE)
 
 #define DISP_FEATURE_PATH "/dev/mi_display/disp_feature"
 #define BRIGHTNESS_PATH "/sys/class/backlight/panel0-backlight/brightness"
@@ -116,7 +117,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     XiaomiSm6225UdfpsHandler() : mDevice(nullptr), mPendingCleanup(false), 
                                   mHbmStuck(false), mAuthInProgress(false), mIsScreenOnFod(false),
                                   mSamplesRemaining(0), mIsFinalEnrollment(false), mHbmEnabled(false),
-                                  isFpcFod(false) {}
+                                  isFpcFod(false), mFingerUpSent(false) {}
 
     ~XiaomiSm6225UdfpsHandler() override {
         shutdownThreads();
@@ -150,6 +151,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mHbmStuck = false;
         mAuthInProgress = true;
         mIsFinalEnrollment = false;
+        mFingerUpSent = false;
         
         if (isFpcFod) {
             setFodStatus(FOD_STATUS_ON);
@@ -291,6 +293,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::atomic<int32_t> mSamplesRemaining{0};
     std::atomic<bool> mIsFinalEnrollment{false};
     std::atomic<bool> mHbmEnabled{false};
+    std::atomic<bool> mFingerUpSent{false};
     
     bool isFpcFod;
     
@@ -450,63 +453,66 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mIsScreenOnFod = false;
         mSamplesRemaining = 0;
         mIsFinalEnrollment = false;
+        mFingerUpSent = false;
     }
 
     /**
-     * Cache Buster: Force kernel to sync FOD state with hardware
+     * Direct Force FOD Off - Multi-layer approach to unbrick the touch controller
      * 
-     * The kernel driver caches register values and skips I2C writes when it thinks
-     * the hardware is already in the correct state. This can lead to desynchronization
-     * where the kernel thinks FOD is OFF but the hardware is stuck in FOD mode.
-     * 
-     * This function toggles the state ON then OFF to force the kernel to actually
-     * write both states to the hardware, restoring synchronization.
+     * Layer 1: Send THP_FOD_DOWNUP_CTL to tell firmware finger is up
+     * Layer 2: Force FOD mode OFF with retries
+     * Layer 3: Global hardware reset as nuclear option
      */
     void directForceFodOff() {
         if (touch_fd_.get() < 0) return;
         
-        LOG(WARNING) << "Executing Cache Buster: Toggling FOD state to force kernel I2C register write";
+        LOG(WARNING) << "Executing Touch Panel State Reset (Multi-layer)";
 
-        // Step 1: Force the kernel state to ON.
-        // This forces the driver to write the 0x03 state to register 0xCF.
-        int bufOn[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_ON};
-        if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufOn) == 0) {
-            LOG(INFO) << "Cache Buster: Set FOD ON successfully";
-        } else {
-            LOG(WARNING) << "Cache Buster: Set FOD ON failed: " << strerror(errno);
+        // Layer 1: Explicitly clear the hardware finger-down state.
+        // If the hardware thinks a finger is down, it will refuse to exit FOD scanning.
+        {
+            std::lock_guard<std::mutex> lock(touch_mutex_);
+            int bufUp[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 0};
+            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufUp) == 0) {
+                LOG(INFO) << "Layer 1: THP_FOD_DOWNUP_CTL (finger up) sent successfully";
+                mFingerUpSent = true;
+            } else {
+                LOG(WARNING) << "Layer 1: THP_FOD_DOWNUP_CTL failed: " << strerror(errno);
+            }
         }
         
-        // Wait 15ms to ensure the hardware bus processes the ON command.
-        std::this_thread::sleep_for(std::chrono::milliseconds(15));
-        
-        // Step 2: Force the kernel state to OFF.
-        // Because the cache is now ON, the kernel is forced to physically write
-        // the 0x01 state to register 0xCF, unbricking the touch IC.
-        int bufOff[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_OFF};
-        
-        for (int attempt = 0; attempt < 5; attempt++) {
-            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufOff) == 0) {
-                LOG(INFO) << "Cache Buster: Set FOD OFF succeeded on attempt " << attempt;
-                return;
+        // Let the firmware process the finger release
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+        // Layer 2: Force FOD mode OFF with retries
+        {
+            std::lock_guard<std::mutex> lock(touch_mutex_);
+            int bufOff[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_OFF};
+            for (int attempt = 0; attempt < 5; attempt++) {
+                if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufOff) == 0) {
+                    LOG(INFO) << "Layer 2: Forced FOD OFF succeeded on attempt " << attempt;
+                    return;
+                }
+                int err = errno;
+                LOG(WARNING) << "Layer 2: Forced FOD OFF attempt " << attempt << " failed: " << strerror(err);
+                if (err != EBUSY && err != EAGAIN && err != EINTR) {
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(5 * (attempt + 1)));
             }
-            int err = errno;
-            LOG(WARNING) << "Cache Buster OFF attempt " << attempt << " failed: " << strerror(err);
-            if (err != EBUSY && err != EAGAIN && err != EINTR) {
-                break;
-            }
-            // Exponential backoff: 5ms, 10ms, 20ms, 40ms, 80ms
-            std::this_thread::sleep_for(std::chrono::milliseconds(5 * (attempt + 1)));
         }
         
-        // Step 3: Ultimate Failsafe (Xiaomi Touch Reset)
-        // If the specific FOD register is completely trashed, hit the global touch reset mode
-        // mapped in xiaomi_touch.h (RESET_MODE = 6)
-        LOG(WARNING) << "Cache Buster failed, attempting global touch panel RESET_MODE";
-        int bufReset[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, RESET_MODE, 1};
-        if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufReset) == 0) {
-            LOG(INFO) << "Touch panel RESET_MODE succeeded";
-        } else {
-            LOG(ERROR) << "Touch panel RESET_MODE failed: " << strerror(errno);
+        // Layer 3: Ultimate Failsafe - Global Hardware Reset
+        LOG(WARNING) << "Layer 3: Attempting global touch panel hardware reset";
+        {
+            std::lock_guard<std::mutex> lock(touch_mutex_);
+            if (ioctl(touch_fd_.get(), TOUCH_IOC_RESET_MODE) == 0) {
+                LOG(INFO) << "Layer 3: Touch panel global reset succeeded";
+                // Wait for reset to settle
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            } else {
+                LOG(ERROR) << "Layer 3: Touch panel global reset failed: " << strerror(errno);
+            }
         }
     }
 
@@ -514,6 +520,19 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         if (mPendingCleanup.load()) return;
         
         bool screenOn = isScreenOn();
+
+        // 1. Notify touch firmware of the physical finger state
+        // This is critical - if the firmware thinks the finger is still down,
+        // it will keep the gesture scanner active
+        {
+            std::lock_guard<std::mutex> lock(touch_mutex_);
+            if (touch_fd_.get() >= 0) {
+                int bufDownUp[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, pressed ? 1 : 0};
+                if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufDownUp) == 0) {
+                    mFingerUpSent = !pressed;
+                }
+            }
+        }
         
         if (screenOn && pressed) {
             mIsScreenOnFod = true;
@@ -594,7 +613,9 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     if (currentState == 0 && isFpcFod && isScreenOffEnabled) {
                         setFodStatus(FOD_STATUS_ON);
                     } else if (currentState == 1 && isFpcFod) {
-                        if (!enrolling.load() && !mPendingCleanup && !mAuthInProgress.load()) {
+                        // Small delay to let authentication complete if in progress
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                        if (!enrolling.load() && !mAuthInProgress.load() && !mPendingCleanup.load()) {
                             forceHbmCleanup(false);
                         }
                     }
@@ -656,7 +677,15 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     bool pressed = (ev.value == 1);
                     bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
                     
+                    // Always ensure FOD is disabled and finger-up state is sent on finger up
                     if (!pressed) {
+                        // Send finger up to firmware if not already sent
+                        if (!mFingerUpSent.load()) {
+                            std::lock_guard<std::mutex> lock(touch_mutex_);
+                            int bufUp[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 0};
+                            ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufUp);
+                            mFingerUpSent = true;
+                        }
                         setFodStatus(FOD_STATUS_OFF);
                     }
                     
