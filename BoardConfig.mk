@@ -33,6 +33,9 @@ AB_OTA_PARTITIONS += \
     vendor_boot \
     vendor_dlkm
 
+# Media
+TARGET_USES_ION := true
+
 # Architecture
 TARGET_ARCH := arm64
 TARGET_ARCH_VARIANT := armv8-a
@@ -146,7 +149,7 @@ BOARD_KERNEL_CMDLINE := \
 
 # Kernel prebuilt
 TARGET_KERNEL_ARCH := arm64
-INLINE_KERNEL_BUILDING := false
+INLINE_KERNEL_BUILDING := true
 TARGET_KERNEL_HEADER_ARCH := arm64
 TARGET_KERNEL_VERSION := 5.15
 
