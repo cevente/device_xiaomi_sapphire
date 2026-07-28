@@ -19,6 +19,7 @@
 #include <linux/input.h>
 #include <dirent.h>
 #include <limits.h>
+#include <sys/time.h>
 
 #include <atomic>
 #include <cerrno>
@@ -27,6 +28,8 @@
 #include <mutex>
 #include <thread>
 #include <condition_variable>
+#include <sstream>
+#include <iomanip>
 
 // Display and DRM Headers
 #include "display/drm/mi_disp.h"
@@ -116,7 +119,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     XiaomiSm6225UdfpsHandler() : mDevice(nullptr), mPendingCleanup(false), 
                                   mHbmStuck(false), mAuthInProgress(false), mIsScreenOnFod(false),
                                   mSamplesRemaining(0), mIsFinalEnrollment(false), mHbmEnabled(false),
-                                  isFpcFod(false) {}
+                                  isFpcFod(false), mFingerUpSent(false), mLastFodState(-1) {}
 
     ~XiaomiSm6225UdfpsHandler() override {
         shutdownThreads();
@@ -140,7 +143,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
     }
 
-    void onFingerDown(uint32_t /*x*/, uint32_t /*y*/, float /*minor*/, float /*major*/) override {
+    void onFingerDown(uint32_t x, uint32_t y, float minor, float major) override {
         if (mPendingCleanup.load()) {
             return;
         }
@@ -150,6 +153,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mHbmStuck = false;
         mAuthInProgress = true;
         mIsFinalEnrollment = false;
+        mFingerUpSent = false;
         
         if (isFpcFod) {
             setFodStatus(FOD_STATUS_ON);
@@ -240,7 +244,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         }
     }
 
-    void onEnrollmentProgress(int32_t /*enrollmentId*/, int32_t remaining) override {
+    void onEnrollmentProgress(int32_t enrollmentId, int32_t remaining) override {
         mSamplesRemaining = remaining;
         if (remaining == 0) {
             mIsFinalEnrollment = true;
@@ -291,6 +295,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::atomic<int32_t> mSamplesRemaining{0};
     std::atomic<bool> mIsFinalEnrollment{false};
     std::atomic<bool> mHbmEnabled{false};
+    std::atomic<bool> mFingerUpSent{false};
+    std::atomic<int> mLastFodState{-1};
     
     bool isFpcFod;
     
@@ -307,10 +313,7 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     std::atomic<bool> cleanupThreadRunning{false};
 
     bool isFingerprintActive() {
-        return enrolling.load() || 
-               mAuthInProgress.load() || 
-               mPendingCleanup.load() ||
-               mIsFingerDown.load();
+        return enrolling.load() || mAuthInProgress.load() || mPendingCleanup.load() || mIsFingerDown.load();
     }
 
     void sendEarlyWakeupHint() {
@@ -353,6 +356,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void disableHbm() {
+        if (!mHbmEnabled.load()) return;
+
         std::lock_guard<std::mutex> lock(disp_mutex_);
         if (disp_fd_.get() >= 0) {
             disp_local_hbm_req req;
@@ -422,8 +427,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
     }
 
     void forceHbmCleanup(bool isFinalEnrollment = false) {
+        directForceFodOff();
         disableHbm();
-        setFodStatus(FOD_STATUS_OFF);
         
         if (isFinalEnrollment) {
             std::lock_guard<std::mutex> lock(disp_mutex_);
@@ -448,12 +453,55 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mIsScreenOnFod = false;
         mSamplesRemaining = 0;
         mIsFinalEnrollment = false;
+        mFingerUpSent = false;
+        mLastFodState = -1;
+    }
+
+    void directForceFodOff() {
+        if (touch_fd_.get() < 0) return;
+        
+        // Yield to kernel IRQ thread
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+        // Release THP_FOD_DOWNUP_CTL
+        {
+            std::lock_guard<std::mutex> lock(touch_mutex_);
+            int bufUp[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 0};
+            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufUp) == 0) {
+                mFingerUpSent = true;
+            }
+        }
+
+        // Ensure FOD is OFF
+        {
+            std::lock_guard<std::mutex> lock(touch_mutex_);
+            int bufOff[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_OFF};
+            ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufOff);
+        }
+        
+        // Kick into Active Mode
+        {
+            std::lock_guard<std::mutex> lock(touch_mutex_);
+            int bufActive[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Active_MODE, 1};
+            ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufActive);
+        }
     }
 
     void setFingerDown(bool pressed) {
         if (mPendingCleanup.load()) return;
         
         bool screenOn = isScreenOn();
+
+        // Notify touch firmware of physical finger state
+        {
+            std::lock_guard<std::mutex> lock(touch_mutex_);
+            if (touch_fd_.get() >= 0) {
+                int bufDownUp[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, pressed ? 1 : 0};
+                if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufDownUp) == 0) {
+                    mFingerUpSent = !pressed;
+                }
+            }
+        }
         
         if (screenOn && pressed) {
             mIsScreenOnFod = true;
@@ -534,7 +582,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     if (currentState == 0 && isFpcFod && isScreenOffEnabled) {
                         setFodStatus(FOD_STATUS_ON);
                     } else if (currentState == 1 && isFpcFod) {
-                        if (!enrolling.load() && !mPendingCleanup && !mAuthInProgress.load()) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                        if (!enrolling.load() && !mAuthInProgress.load() && !mPendingCleanup.load()) {
                             forceHbmCleanup(false);
                         }
                     }
@@ -542,6 +591,21 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+    }
+
+    void setFodStatus(int value) {
+        if (value == mLastFodState.load()) return;
+        
+        if (value == FOD_STATUS_ON && isScreenOn()) return;
+
+        std::lock_guard<std::mutex> lock(touch_mutex_);
+        if (touch_fd_.get() < 0) return;
+
+        int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, value};
+        
+        if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) == 0) {
+            mLastFodState = value;
         }
     }
 
@@ -556,10 +620,18 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         android::base::unique_fd touchFd(fd);
         struct pollfd tsPoll = { .fd = touchFd.get(), .events = POLLIN, .revents = 0 };
         struct input_event ev;
+        int consecutiveErrors = 0;
         
         while (isRunning.load()) {
             int rc = poll(&tsPoll, 1, 1000);
-            if (rc <= 0) continue;
+            if (rc < 0) {
+                consecutiveErrors++;
+                if (consecutiveErrors > 10) break;
+                continue;
+            }
+            consecutiveErrors = 0;
+            
+            if (rc == 0) continue;
 
             if (tsPoll.revents & POLLIN) {
                 ssize_t bytesRead = read(touchFd.get(), &ev, sizeof(struct input_event));
@@ -573,14 +645,18 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
                     
                     if (!pressed) {
+                        if (!mFingerUpSent.load()) {
+                            std::lock_guard<std::mutex> lock(touch_mutex_);
+                            int bufUp[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 0};
+                            ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufUp);
+                            mFingerUpSent = true;
+                        }
                         setFodStatus(FOD_STATUS_OFF);
                     }
                     
                     if (!screenOn && !isScreenOffEnabled) continue;
                     
-                    if (screenOn && pressed && !fpActive && !mPendingCleanup.load()) {
-                        continue;
-                    }
+                    if (screenOn && pressed && !fpActive && !mPendingCleanup.load()) continue;
                     
                     mIsFingerDown = pressed;
                     
@@ -678,30 +754,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     }
                 }
             }
-        }
-    }
-
-    void setFodStatus(int value) {
-        if (value == FOD_STATUS_ON && isScreenOn()) {
-            return;
-        }
-
-        std::lock_guard<std::mutex> lock(touch_mutex_);
-        if (touch_fd_.get() < 0) return;
-
-        int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, value};
-        
-        // ONLY CHANGE: Retry on transient errors with small delay
-        for (int attempt = 0; attempt < 3; attempt++) {
-            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) == 0) {
-                return;
-            }
-            LOG(WARNING) << "setFodStatus(" << value << ") attempt " << attempt 
-                        << " failed: " << strerror(errno);
-            if (errno != EBUSY && errno != EAGAIN) {
-                return;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
     }
 
