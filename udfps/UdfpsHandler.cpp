@@ -185,7 +185,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             mIsFingerDown = false;
             forceHbmCleanup(wasFinalEnrollment);
             setFodStatus(FOD_STATUS_OFF);
-            resetTouchState();
             return;
         }
         
@@ -199,7 +198,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             
             if (!enrolling.load()) {
                 setFodStatus(FOD_STATUS_OFF);
-                resetTouchState();
             }
         }
     }
@@ -223,7 +221,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                     disableHbm();
                     forceHbmCleanup(false);
                     setFodStatus(FOD_STATUS_OFF);
-                    resetTouchState();
                     setDispFpStatus(ENROLL_STOP);
                     mAuthInProgress = false;
                     mIsScreenOnFod = false;
@@ -246,7 +243,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             disableHbm();
             forceHbmCleanup(false);
             setFodStatus(FOD_STATUS_OFF);
-            resetTouchState();
             
             if (!enrolling.load()) {
                 setDispFpStatus(FINGERPRINT_NONE);
@@ -316,7 +312,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         mIsFinalEnrollment = false;
         disableHbm();
         setFodStatus(FOD_STATUS_OFF);
-        resetTouchState();
         setDispFpStatus(FINGERPRINT_NONE);
     }
 
@@ -333,7 +328,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         setDispFpStatus(FINGERPRINT_NONE);
         disableHbm();
         setFodStatus(FOD_STATUS_OFF);
-        resetTouchState();
     }
 
   private:
@@ -440,9 +434,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
      * Spamming ioctls at the same time corrupts the I2C bus.
      * 
      * Step 1: Yield (30ms) to let kernel IRQ thread finish
-     * Step 2: Release THP_FOD_DOWNUP_CTL
-     * Step 3: Ensure FOD is OFF
-     * Step 4: KICK into Touch_Active_MODE to force matrix switch
+     * Step 2: Ensure FOD is OFF
+     * Step 3: KICK into Touch_Active_MODE to force matrix switch
      */
     void yieldAndKick() {
         if (touch_fd_.get() < 0) {
@@ -455,52 +448,29 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
         // Step 1: Yield to kernel IRQ thread
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
 
-        // Step 2: Release THP_FOD_DOWNUP_CTL
-        {
-            std::lock_guard<std::mutex> lock(touch_mutex_);
-            int bufUp[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 0};
-            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufUp) < 0) {
-                LOG(ERROR) << "Yield & Kick: THP_FOD_DOWNUP_CTL failed: " << strerror(errno);
-            } else {
-                LOG(INFO) << "✅ Yield & Kick: THP_FOD_DOWNUP_CTL released";
-            }
-        }
-
-        // Step 3: Ensure FOD is OFF
+        // Step 2: Ensure FOD is OFF
         {
             std::lock_guard<std::mutex> lock(touch_mutex_);
             int bufOff[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, FOD_STATUS_OFF};
-            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufOff) < 0) {
-                LOG(ERROR) << "Yield & Kick: FOD OFF failed: " << strerror(errno);
-            } else {
+            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufOff) == 0) {
                 LOG(INFO) << "✅ Yield & Kick: FOD OFF confirmed";
+            } else {
+                LOG(ERROR) << "Yield & Kick: FOD OFF failed: " << strerror(errno);
             }
         }
 
-        // Step 4: The Kick - Force Touch_Active_MODE
+        // Step 3: The Kick - Force Touch_Active_MODE
         {
             std::lock_guard<std::mutex> lock(touch_mutex_);
             int bufActive[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Active_MODE, 1};
-            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufActive) < 0) {
-                LOG(ERROR) << "Yield & Kick: Touch_Active_MODE kick failed: " << strerror(errno);
-            } else {
+            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &bufActive) == 0) {
                 LOG(INFO) << "✅ Yield & Kick: Touch_Active_MODE kick successful";
+            } else {
+                LOG(ERROR) << "Yield & Kick: Touch_Active_MODE kick failed: " << strerror(errno);
             }
         }
 
         LOG(INFO) << "✅ Yield & Kick: Complete";
-    }
-
-    void resetTouchState() {
-        std::lock_guard<std::mutex> lock(touch_mutex_);
-        if (touch_fd_.get() >= 0) {
-            int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, 0};
-            if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
-                LOG(ERROR) << "Failed to reset touch state: " << strerror(errno);
-            } else {
-                LOG(INFO) << "✅ Touch state reset (FOD disabled)";
-            }
-        }
     }
 
     void scheduleHbmTimeout(bool isFinalEnrollment = false) {
@@ -983,7 +953,6 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
                 return;
             } else {
                 LOG(INFO) << "💡 Deferred cleanup pending - processing finger UP to turn off HBM";
-                // Process the finger UP
             }
         }
         
@@ -1001,14 +970,8 @@ class XiaomiSm6225UdfpsHandler : public UdfpsHandler {
             }
         }
         
-        {
-            std::lock_guard<std::mutex> lock(touch_mutex_);
-            if (touch_fd_.get() >= 0) {
-                int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, pressed ? 1 : 0};
-                if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
-                    LOG(ERROR) << "Failed to set finger down: " << strerror(errno);
-                }
-            }
+        if (pressed) {
+            setFodStatus(FOD_STATUS_ON);
         }
 
         if (!enrolling.load()) {
