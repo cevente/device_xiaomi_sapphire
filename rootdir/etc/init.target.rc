@@ -439,6 +439,8 @@ service set_micharge_perms /vendor/bin/sh -c "chmod 0666 /sys/class/qcom-battery
 
 on property:sys.boot_completed=1
     start set_micharge_perms
+    # Enable PowerHAL hint processing
+    setprop vendor.powerhal.init 1
 
 service getofflinechglog /vendor/bin/sh -c "
     # Wait for system to fully settle
