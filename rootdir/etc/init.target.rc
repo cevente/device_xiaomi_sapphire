@@ -244,7 +244,7 @@ on property:vendor.usb.controller=*
 
 on charger
     wait /dev/block/by-name/system
-    mount erofs /dev/block/by-name/system / ro
+    mount ext4 /dev/block/by-name/system / ro,barrier=1
     wait /dev/block/by-name/persist
     mount ext4 /dev/block/by-name/persist /mnt/vendor/persist nosuid nodev barrier=1
     start vendor.power_off_alarm
