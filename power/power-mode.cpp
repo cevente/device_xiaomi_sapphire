@@ -18,35 +18,46 @@
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <linux/input.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <string>
 
 namespace {
 int open_ts_input() {
     int fd = -1;
     DIR *dir = opendir("/dev/input");
 
-    if (dir != NULL) {
+    if (dir != nullptr) {
         struct dirent *ent;
 
-        while ((ent = readdir(dir)) != NULL) {
+        while ((ent = readdir(dir)) != nullptr) {
             if (ent->d_type == DT_CHR) {
-                char absolute_path[PATH_MAX] = {0};
+                // Safely construct the absolute path exactly like the UDFPS handler
+                std::string absolute_path = std::string("/dev/input/") + ent->d_name;
                 char name[80] = {0};
 
-                strcpy(absolute_path, "/dev/input/");
-                strcat(absolute_path, ent->d_name);
+                fd = open(absolute_path.c_str(), O_RDWR);
+                if (fd < 0) {
+                    continue; // Skip without crashing if permissions are denied
+                }
 
-                fd = open(absolute_path, O_RDWR);
                 if (ioctl(fd, EVIOCGNAME(sizeof(name) - 1), &name) > 0) {
-                    if (strcmp(name, "fts") == 0 || strcmp(name, "goodix_ts") == 0 ||
-                            strcmp(name, "NVTCapacitiveTouchScreen") == 0)
+                    // Catch both potential FocalTech names, plus Goodix and NVT
+                    if (strcmp(name, "fts_ts") == 0 || 
+                        strcmp(name, "fts") == 0 || 
+                        strcmp(name, "goodix_ts") == 0 || 
+                        strcmp(name, "NVTCapacitiveTouchScreen") == 0) {
+                        LOG(INFO) << "PowerHAL: Found supported touchscreen at " << absolute_path << " (" << name << ")";
                         break;
+                    }
                 }
 
                 close(fd);
                 fd = -1;
             }
         }
-
         closedir(dir);
     }
 
@@ -77,19 +88,27 @@ bool isDeviceSpecificModeSupported(Mode type, bool* _aidl_return) {
 }
 
 bool setDeviceSpecificMode(Mode type, bool enabled) {
+    LOG(INFO) << "PowerHAL: setDeviceSpecificMode called for Mode: " << static_cast<int>(type) << " | Enabled: " << enabled;
+
     switch (type) {
         case Mode::DOUBLE_TAP_TO_WAKE: {
             int fd = open_ts_input();
             if (fd == -1) {
-                LOG(WARNING)
-                    << "DT2W won't work because no supported touchscreen input devices were found";
+                LOG(WARNING) << "PowerHAL: DT2W failed. No supported touchscreen found, or Power HAL lacks O_RDWR permissions for /dev/input/.";
                 return false;
             }
             struct input_event ev;
             ev.type = EV_SYN;
             ev.code = SYN_CONFIG;
             ev.value = enabled ? kInputEventWakeupModeOn : kInputEventWakeupModeOff;
-            write(fd, &ev, sizeof(ev));
+            
+            ssize_t ret = write(fd, &ev, sizeof(ev));
+            if (ret < 0) {
+                LOG(ERROR) << "PowerHAL: Failed to write SYN_CONFIG to touchscreen node. Error: " << strerror(errno);
+            } else {
+                LOG(INFO) << "PowerHAL: Successfully wrote DT2W state to touchscreen node.";
+            }
+            
             close(fd);
             return true;
         }
