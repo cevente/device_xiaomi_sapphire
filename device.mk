@@ -470,7 +470,7 @@ PRODUCT_PACKAGES += \
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/configs/perf/powerhint.json:$(TARGET_COPY_OUT_VENDOR)/etc/powerhint.json
 $(call soong_config_set,power_libperfmgr,mode_extension_lib,//$(LOCAL_PATH):libperfmgr-ext-xiaomi)
-$(call soong_config_set,qtipower,tap_to_wake_node,/proc/tp_gesture)
+# $(call soong_config_set,qtipower,tap_to_wake_node,/proc/tp_gesture)
 
 # QCC
 PRODUCT_PACKAGES += \
