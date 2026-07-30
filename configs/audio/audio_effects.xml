@@ -56,7 +56,7 @@
         <library name="vqe" path="libswvqe.so"/>
         <!--DOLBY END-->
                 <!--Spatial Audio-->
-        <library name="spatializer" path="libspatialaudio.so"/>
+        <library name="spatializer" path="libswspatializer.so"/>
 	            <!--Spatial Audio-->
     </libraries>
     <effects>
