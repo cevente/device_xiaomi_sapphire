@@ -41,7 +41,7 @@
     <bool name="config_powerDecoupleInteractiveModeFromDisplay">true</bool>
 
     <!-- Whether to suspend when screen is off due to proximity -->
-    <bool name="config_suspendWhenScreenOffDueToProximity">true</bool>
+    <bool name="config_suspendWhenScreenOffDueToProximity">false</bool>
 
     <!-- Whether to use auto suspend -->
     <bool name="config_useAutoSuspend">true</bool>
