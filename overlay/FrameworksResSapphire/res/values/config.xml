@@ -53,7 +53,7 @@
     <bool name="config_dozePickupGestureEnabled">false</bool>
 
     <!-- Whether doze pulse on pickup is enabled -->
-    <bool name="config_dozePulsePickup">true</bool>
+    <!--bool name="config_dozePulsePickup">true</bool-->
 
     <!-- Whether doze pulse on proximity is enabled -->
     <bool name="config_dozePulseProximity">true</bool>
