@@ -1,3 +1,4 @@
+allow init mi_thermald:process noatsecure;
 allow init debugfs_tracing_debug:dir mounton;
 allow init proc:file { setattr };
 allow init hal_fingerprint_default:process ptrace;
