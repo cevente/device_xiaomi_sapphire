@@ -56,7 +56,7 @@
     <bool name="config_dozePulsePickup">true</bool>
 
     <!-- Whether doze pulse on proximity is enabled -->
-    <bool name="config_dozePulseProximity">false</bool>
+    <bool name="config_dozePulseProximity">true</bool>
 
     <!-- Whether doze pulse on tilt is enabled -->
     <bool name="config_dozePulseTilt">true</bool>
@@ -89,7 +89,7 @@
     <bool name="config_pocketModeSupported">true</bool>
 
     <!-- Whether pocket mode uses light sensor -->
-    <bool name="config_pocketUseLightSensor">false</bool>
+    <bool name="config_pocketUseLightSensor">true</bool>
 
     <!-- Whether proximity check on FPS unlock is enabled -->
     <bool name="config_proximityCheckOnFpsUnlock">true</bool>
