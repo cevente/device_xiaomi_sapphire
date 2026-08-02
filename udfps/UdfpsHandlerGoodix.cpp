@@ -82,10 +82,12 @@ static disp_event_resp* parseDispEvent(int fd) {
 
 }  // anonymous namespace
 
-GoodixUdfpsHandler::GoodixUdfpsHandler() : mDevice(nullptr) {}
+GoodixUdfpsHandler::GoodixUdfpsHandler() : mDevice(nullptr) {
+    LOG(INFO) << "GoodixUdfpsHandler constructor called";
+}
 
 GoodixUdfpsHandler::~GoodixUdfpsHandler() {
-    LOG(INFO) << "Destructor called, shutting down threads";
+    LOG(INFO) << "GoodixUdfpsHandler destructor called, shutting down threads";
     shutdownThreads();
 }
 
@@ -97,21 +99,25 @@ void GoodixUdfpsHandler::init(fingerprint_device_t* device) {
     touch_fd_ = android::base::unique_fd(open(TOUCH_DEV_PATH, O_RDWR));
     if (touch_fd_.get() < 0) {
         LOG(ERROR) << "Failed to open touch device: " << strerror(errno);
+    } else {
+        LOG(INFO) << "Touch device opened successfully, fd: " << touch_fd_.get();
     }
 
     disp_fd_ = android::base::unique_fd(open(DISP_FEATURE_PATH, O_RDWR));
     if (disp_fd_.get() < 0) {
         LOG(ERROR) << "Failed to open display device: " << strerror(errno);
+    } else {
+        LOG(INFO) << "Display device opened successfully, fd: " << disp_fd_.get();
     }
 
     fodThread_ = std::thread([this]() { fodPressMonitorThread(); });
     dispThread_ = std::thread([this]() { displayEventMonitorThread(); });
     
-    LOG(INFO) << "Goodix UDFPS handler initialized";
+    LOG(INFO) << "Goodix UDFPS handler initialized successfully";
 }
 
 void GoodixUdfpsHandler::onFingerDown(uint32_t /*x*/, uint32_t /*y*/, float /*minor*/, float /*major*/) {
-    LOG(INFO) << __func__;
+    LOG(INFO) << __func__ << " - Finger down event from framework";
     
     mFbDownTimeMs.store(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -120,14 +126,14 @@ void GoodixUdfpsHandler::onFingerDown(uint32_t /*x*/, uint32_t /*y*/, float /*mi
 }
 
 void GoodixUdfpsHandler::onFingerUp() {
-    LOG(INFO) << __func__;
+    LOG(INFO) << __func__ << " - Finger up event from framework";
     
     uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
     uint64_t elapsed = now - mFbDownTimeMs.load();
     
     if (elapsed < 250) {
-        LOG(INFO) << "UDFPS: Ignorando falso UP del framework (pasaron " << elapsed << "ms)";
+        LOG(INFO) << "UDFPS: Ignoring false UP from framework (" << elapsed << "ms elapsed)";
         return;
     }
 
@@ -138,6 +144,7 @@ void GoodixUdfpsHandler::onAcquired(int32_t result, int32_t vendorCode) {
     LOG(INFO) << __func__ << " result: " << result << " vendorCode: " << vendorCode;
     
     if (static_cast<AcquiredInfo>(result) == AcquiredInfo::GOOD) {
+        LOG(INFO) << "Acquired GOOD - Successful fingerprint capture";
         {
             std::lock_guard<std::mutex> lock(disp_mutex_);
             if (disp_fd_.get() >= 0) {
@@ -145,65 +152,83 @@ void GoodixUdfpsHandler::onAcquired(int32_t result, int32_t vendorCode) {
                 req.base.flag = 0;
                 req.base.disp_id = MI_DISP_PRIMARY;
                 req.local_hbm_value = LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
-                ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req);
+                if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) == 0) {
+                    LOG(DEBUG) << "HBM disabled after successful capture";
+                } else {
+                    LOG(ERROR) << "Failed to disable HBM";
+                }
             }
         }
         
         if (!enrolling.load()) {
+            LOG(DEBUG) << "Not enrolling, turning FOD off";
             setFodStatus(FOD_STATUS_OFF);
         }
     }
 
     if (vendorCode == 21) {
+        LOG(INFO) << "Vendor code 21 - FOD status ON";
         setFodStatus(FOD_STATUS_ON);
     }
 }
 
 void GoodixUdfpsHandler::cancel() {
-    LOG(INFO) << __func__;
+    LOG(INFO) << __func__ << " - Canceling fingerprint operation";
     enrolling.store(false);
     setFodStatus(FOD_STATUS_OFF);
 }
 
 void GoodixUdfpsHandler::preEnroll() {
-    LOG(INFO) << __func__;
+    LOG(INFO) << __func__ << " - Pre-enroll started";
     enrolling.store(true);
 }
 
 void GoodixUdfpsHandler::enroll() {
-    LOG(INFO) << __func__;
+    LOG(INFO) << __func__ << " - Enrollment started";
     enrolling.store(true);
 }
 
 void GoodixUdfpsHandler::postEnroll() {
-    LOG(INFO) << __func__;
+    LOG(INFO) << __func__ << " - Post-enroll completed";
     enrolling.store(false);
     setFodStatus(FOD_STATUS_OFF);
 }
 
 int GoodixUdfpsHandler::getBrightness() {
     int fd = open(BRIGHTNESS_PATH, O_RDONLY);
-    if (fd < 0) return -1;
+    if (fd < 0) {
+        LOG(ERROR) << "Failed to open brightness path: " << strerror(errno);
+        return -1;
+    }
     char buf[12];
     ssize_t len = read(fd, buf, sizeof(buf) - 1);
     close(fd);
-    if (len <= 0) return -1;
+    if (len <= 0) {
+        LOG(ERROR) << "Failed to read brightness value";
+        return -1;
+    }
     buf[len] = '\0';
-    return atoi(buf);
+    int brightness = atoi(buf);
+    LOG(VERBOSE) << "Current brightness: " << brightness;
+    return brightness;
 }
 
 void GoodixUdfpsHandler::shutdownThreads() {
+    LOG(INFO) << "Shutting down threads";
     isRunning.store(false);
     if (fodThread_.joinable()) {
+        LOG(INFO) << "Joining FOD press monitor thread";
         fodThread_.join();
     }
     if (dispThread_.joinable()) {
+        LOG(INFO) << "Joining display event monitor thread";
         dispThread_.join();
     }
+    LOG(INFO) << "All threads shut down";
 }
 
 void GoodixUdfpsHandler::fodPressMonitorThread() {
-    LOG(INFO) << "FOD press monitor thread started";
+    LOG(INFO) << "FOD press monitor thread started (PID: " << getpid() << ")";
     
     int fd = open(FOD_PRESS_STATUS_PATH, O_RDONLY);
     if (fd < 0) {
@@ -211,6 +236,7 @@ void GoodixUdfpsHandler::fodPressMonitorThread() {
                    << ", error: " << strerror(errno);
         return;
     }
+    LOG(INFO) << "Opened " << FOD_PRESS_STATUS_PATH << " successfully, fd: " << fd;
 
     readBool(fd);
 
@@ -229,13 +255,17 @@ void GoodixUdfpsHandler::fodPressMonitorThread() {
             break;
         }
 
-        if (rc == 0) continue;
+        if (rc == 0) {
+            LOG(VERBOSE) << "FOD press poll timeout (no event)";
+            continue;
+        }
 
         if (!(fodPressStatusPoll.revents & (POLLERR | POLLPRI))) {
             if (fodPressStatusPoll.revents & (POLLHUP | POLLNVAL)) {
                 LOG(ERROR) << "Poll error event: " << fodPressStatusPoll.revents;
                 break;
             }
+            LOG(WARNING) << "Unexpected poll revents: " << fodPressStatusPoll.revents;
             fodPressStatusPoll.revents = 0;
             continue;
         }
@@ -246,27 +276,32 @@ void GoodixUdfpsHandler::fodPressMonitorThread() {
         uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
         
+        LOG(DEBUG) << "FOD press status changed: " << (pressed ? "PRESSED" : "RELEASED");
+        
         if (pressed) {
             mFbDownTimeMs.store(now);
         } else {
             uint64_t elapsed = now - mFbDownTimeMs.load();
             if (elapsed < 250) {
-                LOG(INFO) << "UDFPS: Hardware marco UP muy rapido (" << elapsed << "ms). Esperando 100ms...";
+                LOG(INFO) << "UDFPS: Hardware UP too fast (" << elapsed << "ms). Waiting 100ms...";
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 if (readBool(fd)) {
-                    LOG(INFO) << "UDFPS: El dedo seguia ahi! Falso UP fisico ignorado.";
+                    LOG(INFO) << "UDFPS: Finger still present! False physical UP ignored.";
                     continue; 
                 }
+                LOG(INFO) << "UDFPS: Finger is truly gone after waiting";
             }
         }
 
         bool isScreenOffEnabled = android::base::GetBoolProperty("persist.vendor.sys.fp.screen_off", true);
-        if (!isScreenOffEnabled && getBrightness() == 0) {
-            LOG(INFO) << "UDFPS: Toque ignorado. Screen-Off desactivado.";
+        int brightness = getBrightness();
+        LOG(DEBUG) << "Screen off enabled: " << isScreenOffEnabled << ", brightness: " << brightness;
+        
+        if (!isScreenOffEnabled && brightness == 0) {
+            LOG(INFO) << "UDFPS: Touch ignored. Screen-Off disabled.";
             continue;
         }
 
-        LOG(DEBUG) << "fod_press_status changed: " << (pressed ? "pressed" : "released");
         setFingerDown(pressed);
     }
 
@@ -275,7 +310,7 @@ void GoodixUdfpsHandler::fodPressMonitorThread() {
 }
 
 void GoodixUdfpsHandler::displayEventMonitorThread() {
-    LOG(INFO) << "Display event monitor thread started";
+    LOG(INFO) << "Display event monitor thread started (PID: " << getpid() << ")";
     
     int fd = open(DISP_FEATURE_PATH, O_RDWR);
     if (fd < 0) {
@@ -283,6 +318,7 @@ void GoodixUdfpsHandler::displayEventMonitorThread() {
                    << ", error: " << strerror(errno);
         return;
     }
+    LOG(INFO) << "Opened " << DISP_FEATURE_PATH << " successfully, fd: " << fd;
 
     disp_event_req req;
     req.base.flag = 0;
@@ -293,6 +329,7 @@ void GoodixUdfpsHandler::displayEventMonitorThread() {
         close(fd);
         return;
     }
+    LOG(INFO) << "Registered for display events successfully";
 
     struct pollfd dispEventPoll = {
         .fd = fd,
@@ -309,13 +346,17 @@ void GoodixUdfpsHandler::displayEventMonitorThread() {
             break;
         }
 
-        if (rc == 0) continue;
+        if (rc == 0) {
+            LOG(VERBOSE) << "Display poll timeout (no event)";
+            continue;
+        }
 
         if (!(dispEventPoll.revents & POLLIN)) {
             if (dispEventPoll.revents & (POLLERR | POLLHUP | POLLNVAL)) {
                 LOG(ERROR) << "Display poll error: " << dispEventPoll.revents;
                 break;
             }
+            LOG(WARNING) << "Unexpected display poll revents: " << dispEventPoll.revents;
             dispEventPoll.revents = 0;
             continue;
         }
@@ -324,23 +365,28 @@ void GoodixUdfpsHandler::displayEventMonitorThread() {
 
         struct disp_event_resp* response = parseDispEvent(fd);
         if (response == nullptr) {
+            LOG(ERROR) << "Failed to parse display event";
             continue;
         }
 
         if (response->base.type != MI_DISP_EVENT_FOD) {
-            LOG(WARNING) << "Unexpected display event: " << response->base.type;
+            LOG(WARNING) << "Unexpected display event type: " << response->base.type;
             continue;
         }
 
         int value = response->data[0];
-        LOG(DEBUG) << "Display event data: 0x" << std::hex << value;
+        LOG(INFO) << "Display event received, data: 0x" << std::hex << value << std::dec;
 
         bool localHbmUiReady = value & LOCAL_HBM_UI_READY;
+        LOG(INFO) << "Local HBM UI Ready: " << (localHbmUiReady ? "YES" : "NO");
         
         std::lock_guard<std::mutex> deviceLock(device_mutex_);
         if (mDevice != nullptr) {
-            mDevice->extCmd(mDevice, COMMAND_NIT,
-                          localHbmUiReady ? PARAM_NIT_FOD : PARAM_NIT_NONE);
+            int cmd = localHbmUiReady ? PARAM_NIT_FOD : PARAM_NIT_NONE;
+            LOG(DEBUG) << "Sending NIT command: " << cmd;
+            mDevice->extCmd(mDevice, COMMAND_NIT, cmd);
+        } else {
+            LOG(ERROR) << "Device is null, cannot send NIT command";
         }
     }
 
@@ -349,29 +395,47 @@ void GoodixUdfpsHandler::displayEventMonitorThread() {
 }
 
 void GoodixUdfpsHandler::setFodStatus(int value) {
+    LOG(INFO) << __func__ << " - Setting FOD status to: " << (value ? "ON" : "OFF");
+    
     std::lock_guard<std::mutex> lock(touch_mutex_);
     
     if (touch_fd_.get() < 0) {
-        LOG(ERROR) << "Touch device not opened";
+        LOG(ERROR) << "Touch device not opened, cannot set FOD status";
         return;
     }
 
+    // 1. Original FOD command
     int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Fod_Enable, value};
     if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
         LOG(ERROR) << "Failed to set FOD status: " << strerror(errno);
     } else {
-        LOG(DEBUG) << "Set FOD status to " << value;
+        LOG(INFO) << "Successfully set FOD status to " << (value ? "ON" : "OFF");
+    }
+
+    // 2. INJECTED D2TW RESTORE: Force panel to keep gesture polling alive
+    LOG(INFO) << "Restoring Double-Tap to Wake state (D2TW)";
+    int d2twBuf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, Touch_Doubletap_Mode, 1};
+    if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &d2twBuf) < 0) {
+        LOG(ERROR) << "Failed to restore D2TW state: " << strerror(errno);
+    } else {
+        LOG(INFO) << "D2TW restored successfully";
     }
 }
 
 void GoodixUdfpsHandler::setFingerDown(bool pressed) {
+    LOG(INFO) << __func__ << " - Finger " << (pressed ? "DOWN" : "UP");
+    
     {
         std::lock_guard<std::mutex> lock(touch_mutex_);
         if (touch_fd_.get() >= 0) {
             int buf[MAX_BUF_SIZE] = {MI_DISP_PRIMARY, THP_FOD_DOWNUP_CTL, pressed ? 1 : 0};
             if (ioctl(touch_fd_.get(), TOUCH_IOC_SET_CUR_VALUE, &buf) < 0) {
-                LOG(ERROR) << "Failed to set finger down: " << strerror(errno);
+                LOG(ERROR) << "Failed to set finger down/up: " << strerror(errno);
+            } else {
+                LOG(DEBUG) << "Successfully set finger " << (pressed ? "DOWN" : "UP");
             }
+        } else {
+            LOG(ERROR) << "Touch device not opened, cannot set finger state";
         }
     }
 
@@ -385,15 +449,22 @@ void GoodixUdfpsHandler::setFingerDown(bool pressed) {
                                           : LHBM_TARGET_BRIGHTNESS_OFF_FINGER_UP;
             if (ioctl(disp_fd_.get(), MI_DISP_IOCTL_SET_LOCAL_HBM, &req) < 0) {
                 LOG(ERROR) << "Failed to set HBM: " << strerror(errno);
+            } else {
+                LOG(DEBUG) << "HBM " << (pressed ? "enabled" : "disabled");
             }
+        } else {
+            LOG(ERROR) << "Display device not opened, cannot set HBM";
         }
     }
 
     {
         std::lock_guard<std::mutex> lock(device_mutex_);
         if (mDevice != nullptr) {
-            mDevice->extCmd(mDevice, COMMAND_FOD_PRESS_STATUS,
-                          pressed ? PARAM_FOD_PRESSED : PARAM_FOD_RELEASED);
+            int cmd = pressed ? PARAM_FOD_PRESSED : PARAM_FOD_RELEASED;
+            LOG(DEBUG) << "Sending FOD press command: " << cmd;
+            mDevice->extCmd(mDevice, COMMAND_FOD_PRESS_STATUS, cmd);
+        } else {
+            LOG(ERROR) << "Device is null, cannot send FOD press command";
         }
     }
 }
