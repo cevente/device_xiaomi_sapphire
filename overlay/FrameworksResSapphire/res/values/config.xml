@@ -50,7 +50,7 @@
     <bool name="config_dozeAlwaysOnDisplayAvailable">true</bool>
 
     <!-- Whether doze pickup gesture is enabled -->
-    <bool name="config_dozePickupGestureEnabled">true</bool>
+    <bool name="config_dozePickupGestureEnabled">false</bool>
 
     <!-- Whether doze pulse on pickup is enabled -->
     <bool name="config_dozePulsePickup">true</bool>
@@ -83,13 +83,13 @@
     <bool name="config_ignoreRssnrSignalLevel">true</bool>
 
     <!-- Whether pocket mode light sensor is supported -->
-    <bool name="config_pocketModeLightSensorSupported">true</bool>
+    <bool name="config_pocketModeLightSensorSupported">false</bool>
 
     <!-- Whether pocket mode is supported -->
     <bool name="config_pocketModeSupported">true</bool>
 
     <!-- Whether pocket mode uses light sensor -->
-    <bool name="config_pocketUseLightSensor">true</bool>
+    <bool name="config_pocketUseLightSensor">false</bool>
 
     <!-- Whether proximity check on FPS unlock is enabled -->
     <bool name="config_proximityCheckOnFpsUnlock">true</bool>
