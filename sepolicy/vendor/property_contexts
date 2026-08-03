@@ -23,4 +23,4 @@ persist.vendor.bt.a2dp_offload_cap  u:object_r:vendor_bluetooth_prop:s0
 ro.vendor.camera.res.fmq.size  u:object_r:vendor_camera_res_prop:s0
 
 # NFC
-ro.nfc.port                              u:object_r:vendor_nfc_prop:s0
+ro.vendor.nfc.port                              u:object_r:vendor_nfc_prop:s0
