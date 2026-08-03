@@ -3,3 +3,5 @@ allow init proc:file { setattr };
 allow init hal_fingerprint_default:process ptrace;
 allow vold vendor_sysfs_memory:file { open write getattr };
 allow init vendor_sysfs_memory:file { open write getattr };
+
+allow init vendor_sysfs_scsi_host:file { write read open getattr};
