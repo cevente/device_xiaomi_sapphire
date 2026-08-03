@@ -9,3 +9,5 @@ allow tee vendor_gpt_block_device:blk_file open;
 allow tee vendor_xbl_block_device:blk_file open;
 
 typeattribute tee data_between_core_and_vendor_violators;
+
+allow tee tee_device:chr_file { read write };
