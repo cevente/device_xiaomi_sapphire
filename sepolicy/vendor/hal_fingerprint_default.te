@@ -79,3 +79,6 @@ get_prop(hal_fingerprint_default, vendor_system_prop)
 get_prop(hal_fingerprint_default, vendor_camera_prop)
 get_prop(hal_fingerprint_default, vendor_fp_prop)
 get_prop(system_server, vendor_fp_prop)
+
+allow hal_fingerprint_default graphics_device:chr_file { read write getattr open };
+
