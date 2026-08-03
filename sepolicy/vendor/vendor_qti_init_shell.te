@@ -20,3 +20,6 @@ allow vendor_qti_init_shell proc_dirty:file { getattr open read write };
 allow vendor_qti_init_shell proc_page_cluster:file { open read write getattr };
 allow vendor_qti_init_shell proc_watermark_boost_factor:file { open read write getattr };
 allow vendor_qti_init_shell proc_sched:file { open read write getattr };
+
+allow vendor_qti_init_shell sysfs_mem_sleep:file { write };
+allow vendor_qti_init_shell cgroup:file { getattr };
