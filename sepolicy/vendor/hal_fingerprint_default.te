@@ -82,3 +82,4 @@ get_prop(system_server, vendor_fp_prop)
 
 allow hal_fingerprint_default graphics_device:chr_file { read write getattr open };
 
+allow hal_fingerprint_default graphics_device:chr_file { ioctl };
