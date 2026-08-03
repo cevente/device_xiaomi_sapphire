@@ -53,3 +53,7 @@
 
 /sys/class/wakeup(/.*)?          u:object_r:sysfs_wakeup:s0
 /sys/devices/.*wakeup/.* u:object_r:sysfs_wakeup:s0
+
+/sys/class/power_supply/battery/in_voltage_usb_pd_voltage_max_input     u:object_r:sysfs_batteryinfo:s0
+/sys/class/power_supply/battery/in_activity_sm_fastcharge_mode_input    u:object_r:sysfs_batteryinfo:s0
+
