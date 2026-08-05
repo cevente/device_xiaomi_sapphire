@@ -26,10 +26,12 @@
 
     <!-- Indicate available ColorDisplayManager.COLOR_MODE_xxx. -->
     <integer-array name="config_availableColorModes">
-        <item>0</item> <!-- COLOR_MODE_NATURAL -->
-        <item>1</item> <!-- COLOR_MODE_BOOSTED -->
+        <item>258</item>
+        <item>256</item>
+        <item>257</item>
+        <item>0</item>
+        <item>1</item>
     </integer-array>
-
     <!-- Color mode to use when accessibility transforms are enabled. This color mode must be
          supported by the device, but not necessarily appear in config_availableColorModes. The
          regularly selected color mode will be used if this value is negative. -->
@@ -47,13 +49,19 @@
          If a color mode does not have a corresponding color space specified in this array, the
          currently set composition color space will not be modified.-->
     <integer-array name="config_displayCompositionColorModes">
-        <item>0</item> <!-- COLOR_MODE_NATURAL   -->
-        <item>1</item> <!-- COLOR_MODE_BOOSTED   -->
+        <item>258</item>
+        <item>256</item>
+        <item>257</item>
+        <item>0</item>
+        <item>1</item>
     </integer-array>
 
     <integer-array name="config_displayCompositionColorSpaces">
-        <item>0</item> <!-- COLOR_MODE_DEFAULT    -->
-        <item>0</item> <!-- COLOR_MODE_DEFAULT    -->
+        <item>7</item>
+        <item>7</item>
+        <item>7</item>
+        <item>9</item>
+        <item>9</item>
     </integer-array>
 
     <!-- Is the device capable of hot swapping an UICC Card -->
