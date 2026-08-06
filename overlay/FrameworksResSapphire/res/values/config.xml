@@ -200,6 +200,8 @@
     <!-- Safe media volume index -->
     <integer name="config_safe_media_volume_index">10</integer>
 
+    <integer name="config_screenBrightnessDark">1</integer>
+     
     <integer name="config_screenBrightnessDim">8</integer>
     <integer name="config_screenBrightnessSettingDefault">307</integer>
     <integer name="config_screenBrightnessSettingMaximum">2047</integer>
