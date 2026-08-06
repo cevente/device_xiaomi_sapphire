@@ -1,0 +1,1 @@
+touch.enableForInactiveViewport=1
