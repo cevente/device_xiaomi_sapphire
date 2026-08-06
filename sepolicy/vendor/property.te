@@ -12,3 +12,6 @@ vendor_public_prop(vendor_fp_prop)
 
 # WiFi
 vendor_public_prop(vendor_wifimac_prop)
+
+type vendor_btmac_prop, property_type;
+type vendor_prefetch_prop, property_type;
