@@ -196,11 +196,11 @@
     <!-- Safe media volume index -->
     <integer name="config_safe_media_volume_index">10</integer>
 
-    <!-- Screen brightness dark value -->
-    <integer name="config_screenBrightnessDark">1</integer>
-
-    <!-- Screen brightness dim value -->
-    <integer name="config_screenBrightnessDim">10</integer>
+    <integer name="config_screenBrightnessDim">8</integer>
+    <integer name="config_screenBrightnessSettingDefault">307</integer>
+    <integer name="config_screenBrightnessSettingMaximum">2047</integer>
+    <integer name="config_screenBrightnessSettingMinimum">8</integer>
+    <integer name="config_shutdownBatteryTemperature">580</integer>
 
     <!-- Screen recorder max framerate -->
     <integer name="config_screenRecorderMaxFramerate">60</integer>
@@ -671,19 +671,6 @@
     <integer-array name="config_screenBrighteningThresholds">
         <item>0</item>
     </integer-array>
-
-    <!-- Screen brightness backlight values -->
-    <integer-array name="config_screenBrightnessBacklight">
-        <item>1</item>
-        <item>255</item>
-    </integer-array>
-
-    <!-- Screen brightness in nits -->
-    <array name="config_screenBrightnessNits">
-        <item>4.3</item>
-        <item>1000.0</item>
-    </array>
-
     <!-- Screen darkening thresholds -->
     <integer-array name="config_screenDarkeningThresholds">
         <item>0</item>
@@ -741,6 +728,7 @@
         <item>com.android.documentsui</item>
         <item>com.android.contacts</item>
         <item>com.android.launcher</item>
+        <item>com.android.launcher3</item>
     </string-array>
 
     <!-- Vendor required apps for managed profile -->
