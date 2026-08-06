@@ -681,6 +681,11 @@
     <integer-array name="config_screenDarkeningThresholds">
         <item>0</item>
     </integer-array>
+         <!-- Screen brightness backlight values -->
+    <integer-array name="config_screenBrightnessBacklight">
+        <item>1</item>
+        <item>255</item>
+    </integer-array>
 
     <!-- Screen threshold levels -->
     <array name="config_screenThresholdLevels" />
