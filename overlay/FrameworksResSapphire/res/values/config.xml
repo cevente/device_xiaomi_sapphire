@@ -686,7 +686,11 @@
         <item>1</item>
         <item>255</item>
     </integer-array>
-
+    <!-- Screen brightness in nits -->
+    <array name="config_screenBrightnessNits">
+        <item>4.3</item>
+        <item>1800.0</item>
+    </array>
     <!-- Screen threshold levels -->
     <array name="config_screenThresholdLevels" />
 
