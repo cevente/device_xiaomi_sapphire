@@ -11,3 +11,4 @@ allow tee vendor_xbl_block_device:blk_file open;
 typeattribute tee data_between_core_and_vendor_violators;
 
 allow tee tee_device:chr_file { read write };
+allow tee device:chr_file { read write };
