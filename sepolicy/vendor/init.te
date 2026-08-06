@@ -5,3 +5,7 @@ allow vold vendor_sysfs_memory:file { open write getattr };
 allow init vendor_sysfs_memory:file { open write getattr };
 
 allow init vendor_sysfs_scsi_host:file { write read open getattr};
+
+allow init hwservice_contexts_file:file getattr;
+allow init mac_perms_file:file getattr;
+allow init tmpfs:blk_file read;
