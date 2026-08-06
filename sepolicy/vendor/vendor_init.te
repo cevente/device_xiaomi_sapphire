@@ -27,7 +27,6 @@ allow vendor_qti_init_shell configfs:{
   lnk_file
 } create_file_perms;
 
-allow vendor_init tombstone_data_file:dir search;
 
 # In vendor_init.te
 set_prop(vendor_init, vendor_prefetch_prop)
