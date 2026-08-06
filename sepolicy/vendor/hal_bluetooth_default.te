@@ -4,3 +4,6 @@ allow hal_bluetooth_default vendor_mac_vendor_data_file:file { open read };
 # Assuming you labeled it as 'vendor_ril_btmac_prop' in property.te and property_contexts
 set_prop(hal_bluetooth_default, vendor_bluetooth_prop)
 get_prop(hal_bluetooth_default, vendor_bluetooth_prop)
+
+# In hal_bluetooth_default.te
+set_prop(hal_bluetooth_default, vendor_btmac_prop)
