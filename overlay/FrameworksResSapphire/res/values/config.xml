@@ -5,6 +5,10 @@
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
 
+    <!-- ==================== FRACTIONS ==================== -->
+     
+    <fraction name="config_autoBrightnessAdjustmentMaxGamma">100.0%</fraction>
+
     <!-- ==================== DIMENS ==================== -->
 
     <!-- Minimum screen brightness setting allowed by power manager.
