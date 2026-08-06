@@ -1,4 +1,6 @@
 # Allow IMS factory service access
+
+type hal_dpmqmi_service, service_manager_type, vendor_service;
 allow vendor_dataservice_app hal_ims_factory_service:service_manager { find };
 allow vendor_dataservice_app hal_telephony_service:service_manager find;
 allow vendor_dataservice_app hal_dpmqmi_service:service_manager find;
