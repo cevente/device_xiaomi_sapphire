@@ -55,3 +55,5 @@
 /sys/devices/.*wakeup/.* u:object_r:sysfs_wakeup:s0
 
 /sys/bus/iio/devices/iio:device5(/.*)?    u:object_r:sysfs_batteryinfo:s0
+
+/vendor/bin/hw/vendor\.lineage\.livedisplay-service\.xiaomi_sm6225                                  u:object_r:hal_lineage_livedisplay_qti_exec:s0
