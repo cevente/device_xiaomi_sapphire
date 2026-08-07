@@ -31,20 +31,19 @@ static constexpr const char* kDispCommandPath =
         "/proc/mi_display/tx_cmd_set_prim";
 
 ndk::ScopedAStatus AntiFlicker::getEnabled(bool* aidl_return) {
-    std::string buf;
-    if (!android::base::ReadFileToString(kDispCommandPath, &buf)) {
-        LOG(ERROR) << "Failed to read " << kDispCommandPath;
-        return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
-    }
-    *aidl_return = std::stoi(android::base::Trim(buf)) == 49;
+    // Return the cached state instead of reading the file
+    *aidl_return = mEnabled;
     return ndk::ScopedAStatus::ok();
 }
 
 ndk::ScopedAStatus AntiFlicker::setEnabled(bool enabled) {
-    if (!android::base::WriteStringToFile((enabled ? "49" : "50"), kDispCommandPath)) {
+    // Note the added \n which is often required by procfs handlers
+    if (!android::base::WriteStringToFile((enabled ? "49\n" : "50\n"), kDispCommandPath)) {
         LOG(ERROR) << "Failed to write " << kDispCommandPath;
         return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
     }
+    // Update the cache if the write was successful
+    mEnabled = enabled;
     return ndk::ScopedAStatus::ok();
 }
 
