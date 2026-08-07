@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <string>
 #include <aidl/vendor/lineage/livedisplay/BnSunlightEnhancement.h>
 
 namespace aidl {
@@ -20,6 +21,7 @@ class SunlightEnhancement : public BnSunlightEnhancement {
 
   private:
     bool mEnabled = false;
+    std::string mStoredBrightness;
 };
 
 }  // namespace livedisplay
