@@ -199,6 +199,11 @@ PRODUCT_PACKAGES += \
     vendor.qti.hardware.display.mapperextensions@1.0.vendor \
     vendor.qti.hardware.display.mapperextensions@1.1.vendor
 
+$(foreach display_id, 4630946359590559105 4630946444529356673, \
+    $(eval PRODUCT_COPY_FILES += \
+        $(LOCAL_PATH)/configs/display/displayconfig.xml:$(TARGET_COPY_OUT_VENDOR)/etc/displayconfig/display_id_$(display_id).xml \
+    ))
+
 $(call soong_config_set,qtidisplay,gralloc_handle_has_reserved_size,true)
 
 # Display NDK
