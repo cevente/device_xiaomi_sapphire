@@ -1,0 +1,8 @@
+# hal_lineage_livedisplay_qti.te
+type hal_lineage_livedisplay_qti, domain;
+type hal_lineage_livedisplay_qti_exec, exec_type, vendor_file_type, file_type;
+
+init_daemon_domain(hal_lineage_livedisplay_qti)
+
+# Allow writing to proc/mi_display/tx_cmd_set_prim
+allow hal_lineage_livedisplay_qti proc:file { write open getattr };
