@@ -13,12 +13,13 @@ namespace lineage {
 namespace livedisplay {
 
 class SunlightEnhancement : public BnSunlightEnhancement {
+  public:
     // Methods from ::aidl::vendor::lineage::livedisplay::BnSunlightEnhancement follow.
     ndk::ScopedAStatus getEnabled(bool* _aidl_return) override;
     ndk::ScopedAStatus setEnabled(bool enabled) override;
 
   private:
-    const char* file_;
+    bool mEnabled = false;
 };
 
 }  // namespace livedisplay
