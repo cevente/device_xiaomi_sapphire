@@ -17,6 +17,9 @@ class AntiFlicker : public BnAntiFlicker {
     // Methods from ::aidl::vendor::lineage::livedisplay::BnAntiFlicker follow.
     ndk::ScopedAStatus getEnabled(bool* aidl_return) override;
     ndk::ScopedAStatus setEnabled(bool enabled) override;
+    
+  private:
+    bool mEnabled = false;
 };
 
 }  // namespace livedisplay
