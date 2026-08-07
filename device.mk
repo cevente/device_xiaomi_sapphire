@@ -50,7 +50,7 @@ PRODUCT_PACKAGES += \
 
 # LiveDisplay
 PRODUCT_PACKAGES += \
-    vendor.lineage.livedisplay-service.xiaomi_sm6150
+    vendor.lineage.livedisplay-service.xiaomi_sm6225
 
 # ANT+
 PRODUCT_PACKAGES += \
