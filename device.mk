@@ -48,13 +48,9 @@ PRODUCT_PACKAGES += \
     checkpoint_gc \
     otapreopt_script
 
-# Soong
-SOONG_CONFIG_NAMESPACES += XIAOMI_SM6225
-SOONG_CONFIG_XIAOMI_SM6225 := \
-    livedisplay_support_anti_flicker \
-    livedisplay_support_sunlight_enhancement
-SOONG_CONFIG_XIAOMI_SM6225_livedisplay_support_anti_flicker ?= true
-SOONG_CONFIG_XIAOMI_SM6225_livedisplay_support_sunlight_enhancement ?= true
+# LiveDisplay
+PRODUCT_PACKAGES += \
+    vendor.lineage.livedisplay-service.xiaomi_sm6150
 
 # ANT+
 PRODUCT_PACKAGES += \
