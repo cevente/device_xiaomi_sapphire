@@ -29,7 +29,7 @@
 
 #include "AntiFlicker.h"
 #include "SunlightEnhancement.h"
-#include "display/drm/mi_disp.h"
+#include "mi_disp.h"
 
 using ::aidl::vendor::lineage::livedisplay::AntiFlicker;
 using ::aidl::vendor::lineage::livedisplay::SunlightEnhancement;
