@@ -22,7 +22,7 @@ static constexpr const char* kBrightnessPath =
         "/sys/class/backlight/panel0-backlight/brightness";
 
 ndk::ScopedAStatus SunlightEnhancement::getEnabled(bool* _aidl_return) {
-    // Return the cached state instead of reading the panel command node
+    // Return the cached state instead of reading the file
     *_aidl_return = mEnabled;
     return ndk::ScopedAStatus::ok();
 }
@@ -64,7 +64,7 @@ ndk::ScopedAStatus SunlightEnhancement::setEnabled(bool enabled) {
         }
     }
 
-    // Update the cache
+    // Update the cache if the write was successful
     mEnabled = enabled;
     return ndk::ScopedAStatus::ok();
 }
