@@ -1,2 +1,5 @@
 # Allow writing to proc/mi_display/tx_cmd_set_prim
 allow hal_lineage_livedisplay_qti proc:file { write open getattr };
+
+allow hal_lineage_livedisplay_qti vendor_sysfs_graphics:file { read write open getattr };
+allow hal_lineage_livedisplay_qti vendor_sysfs_graphics:dir search;
