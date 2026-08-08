@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 #include "SunlightEnhancement.h"
-#include "display/drm/mi_disp.h"
+#include "mi_disp.h"
 
 namespace aidl {
 namespace vendor {
