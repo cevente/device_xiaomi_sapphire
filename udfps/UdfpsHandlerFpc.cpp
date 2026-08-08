@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Cedric Loste
+ * Copyright (C) 2026 Cedric Loste
  *
  * Based on original LineageOS UdfpsHandler
  * SPDX-License-Identifier: Apache-2.0
