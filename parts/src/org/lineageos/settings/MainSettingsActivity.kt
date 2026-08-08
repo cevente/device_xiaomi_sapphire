@@ -20,7 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.preference.PreferenceManager
-import com.xiaomi.parts.display.ColorProfileManager
+import com.xiaomi.parts.display.CabcManager
 
 class MainSettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,7 +38,7 @@ class MainSettingsActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    ColorProfileScreen(context = this)
+                    CabcScreen(context = this)
                 }
             }
         }
@@ -46,21 +46,19 @@ class MainSettingsActivity : ComponentActivity() {
 }
 
 @Composable
-fun ColorProfileScreen(context: Context) {
+fun CabcScreen(context: Context) {
     val sharedPrefs = remember { PreferenceManager.getDefaultSharedPreferences(context) }
-    val colorManager = remember { ColorProfileManager() }
+    val cabcManager = remember { CabcManager() }
     
-    var currentProfile by remember { 
-        mutableStateOf(sharedPrefs.getInt("hardware_crc_mode", 0)) 
+    var currentCabc by remember { 
+        mutableStateOf(sharedPrefs.getInt("lcd_cabc_mode", 0)) 
     }
 
-    val profiles = listOf(
-        Pair("SYS_DEFAULT", 0),
-        Pair("SRGB_STANDARD", 1),
-        Pair("DCI_P3_WIDE", 2),
-        Pair("DCI_P3_D65", 3),
-        Pair("DCI_P3_FLAT", 4),
-        Pair("SRGB_D65", 5)
+    val cabcModes = listOf(
+        Pair("CABC Off", 0),       // LCD_CABC_OFF[span_7](start_span)[span_7](end_span)
+        Pair("UI Mode", 1),        // LCD_CABC_UI_ON[span_8](start_span)[span_8](end_span)
+        Pair("Movie Mode", 2),     // LCD_CABC_MOVIE_ON[span_9](start_span)[span_9](end_span)
+        Pair("Still Image Mode", 3) // LCD_CABC_STILL_ON[span_10](start_span)[span_10](end_span)
     )
 
     Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
@@ -74,7 +72,7 @@ fun ColorProfileScreen(context: Context) {
             modifier = Modifier.padding(bottom = 8.dp)
         )
         Text(
-            text = "Display Colorimetry",
+            text = "Content Adaptive Backlight (CABC)",
             style = MaterialTheme.typography.headlineMedium.copy(
                 fontWeight = FontWeight.Bold
             ),
@@ -86,8 +84,8 @@ fun ColorProfileScreen(context: Context) {
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(profiles) { (name, mode) ->
-                val isSelected = currentProfile == mode
+            items(cabcModes) { (name, mode) ->
+                val isSelected = currentCabc == mode
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -96,9 +94,9 @@ fun ColorProfileScreen(context: Context) {
                             shape = RoundedCornerShape(4.dp)
                         )
                         .clickable {
-                            if (colorManager.setProfile(mode)) {
-                                currentProfile = mode
-                                sharedPrefs.edit().putInt("hardware_crc_mode", mode).apply()
+                            if (cabcManager.setCabc(mode)) {
+                                currentCabc = mode
+                                sharedPrefs.edit().putInt("lcd_cabc_mode", mode).apply()
                             }
                         }
                         .padding(horizontal = 16.dp, vertical = 20.dp),
