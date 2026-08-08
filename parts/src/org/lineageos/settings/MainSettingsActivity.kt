@@ -29,7 +29,7 @@ class MainSettingsActivity : ComponentActivity() {
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
-                    background = Color(0xFF0A0A0A), // Deep industrial black
+                    background = Color(0xFF0A0A0A),
                     surface = Color(0xFF141414),
                     onSurface = Color(0xFFE0E0E0)
                 )
@@ -93,7 +93,7 @@ fun ColorProfileScreen(context: Context) {
                         .fillMaxWidth()
                         .background(
                             if (isSelected) Color(0xFF222222) else Color(0xFF121212),
-                            shape = RoundedCornerShape(4.dp) // Sharp, industrial edges
+                            shape = RoundedCornerShape(4.dp)
                         )
                         .clickable {
                             if (colorManager.setProfile(mode)) {
