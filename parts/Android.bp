@@ -55,4 +55,3 @@ prebuilt_etc {
     sub_dir: "permissions",
     system_ext_specific: true,
 }
-
