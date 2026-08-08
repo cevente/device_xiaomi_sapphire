@@ -1,0 +1,4 @@
+-keep class com.xiaomi.parts.display.ColorProfileManager { *; }
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
