@@ -37,8 +37,8 @@ ndk::ScopedAStatus AntiFlicker::getEnabled(bool* aidl_return) {
 }
 
 ndk::ScopedAStatus AntiFlicker::setEnabled(bool enabled) {
-    // Note the added \n which is often required by procfs handlers
-    if (!android::base::WriteStringToFile((enabled ? "49\n" : "50\n"), kDispCommandPath)) {
+    // Attempting write without the newline character (\n)
+    if (!android::base::WriteStringToFile((enabled ? "49" : "50"), kDispCommandPath)) {
         LOG(ERROR) << "Failed to write " << kDispCommandPath;
         return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
     }
