@@ -19,30 +19,49 @@
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/strings.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 #include "AntiFlicker.h"
+#include "display/drm/mi_disp.h"
 
 namespace aidl {
 namespace vendor {
 namespace lineage {
 namespace livedisplay {
 
-static constexpr const char* kDispCommandPath =
-        "/proc/mi_display/tx_cmd_set_prim";
+static constexpr const char* kDispFeaturePath = "/dev/mi_display/disp_feature";
 
 ndk::ScopedAStatus AntiFlicker::getEnabled(bool* aidl_return) {
-    // Return the cached state instead of reading the file
     *aidl_return = mEnabled;
     return ndk::ScopedAStatus::ok();
 }
 
 ndk::ScopedAStatus AntiFlicker::setEnabled(bool enabled) {
-    // Attempting write without the newline character (\n)
-    if (!android::base::WriteStringToFile((enabled ? "49" : "50"), kDispCommandPath)) {
-        LOG(ERROR) << "Failed to write " << kDispCommandPath;
+    if (enabled == mEnabled) {
+        return ndk::ScopedAStatus::ok();
+    }
+
+    int fd = open(kDispFeaturePath, O_RDWR);
+    if (fd < 0) {
+        LOG(ERROR) << "Failed to open " << kDispFeaturePath;
         return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
     }
-    // Update the cache if the write was successful
+
+    struct disp_feature_req req;
+    memset(&req, 0, sizeof(req));
+    req.base.disp_id = MI_DISP_PRIMARY;
+    req.feature_id = DISP_FEATURE_DC;
+    req.feature_val = enabled ? FEATURE_ON : FEATURE_OFF;
+
+    if (ioctl(fd, MI_DISP_IOCTL_SET_FEATURE, &req) < 0) {
+        LOG(ERROR) << "IOCTL MI_DISP_IOCTL_SET_FEATURE failed for DC";
+        close(fd);
+        return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
+    }
+
+    close(fd);
     mEnabled = enabled;
     return ndk::ScopedAStatus::ok();
 }
