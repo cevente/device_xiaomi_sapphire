@@ -1,7 +1,4 @@
 on boot
-    chown system system /proc/mi_display/tx_cmd_set_prim
-    chmod 0666 /proc/mi_display/tx_cmd_set_prim
-
     chown system system /sys/class/backlight/panel0-backlight/brightness
     chmod 0666 /sys/class/backlight/panel0-backlight/brightness
 
