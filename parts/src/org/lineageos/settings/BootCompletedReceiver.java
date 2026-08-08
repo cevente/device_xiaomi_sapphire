@@ -7,10 +7,6 @@ import android.content.SharedPreferences;
 import android.util.Log;
 import androidx.preference.PreferenceManager;
 
-import org.lineageos.settings.display.KcalUtils;
-import org.lineageos.settings.utils.HapticUtils;
-import org.lineageos.settings.refreshrate.RefreshUtils;
-import org.lineageos.settings.thermal.ThermalUtils;
 import com.xiaomi.parts.display.ColorProfileManager;
 
 public class BootCompletedReceiver extends BroadcastReceiver {
@@ -27,12 +23,6 @@ public class BootCompletedReceiver extends BroadcastReceiver {
         if (DEBUG) Log.d(TAG, "Received boot completed intent");
 
         SharedPreferences sharedPrefs = PreferenceManager.getDefaultSharedPreferences(context);
-
-        // Legacy Restorations (if applicable to your build)
-        if (KcalUtils.isKcalSupported()) KcalUtils.writeCurrentSettings(sharedPrefs);
-        HapticUtils.restoreLevel(context);
-        RefreshUtils.startService(context);
-        ThermalUtils.startService(context);
 
         // Hardware Color Profile Restoration
         int savedCrcMode = sharedPrefs.getInt("hardware_crc_mode", 0); // Default to CRC_OFF (0)
