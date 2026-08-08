@@ -42,12 +42,14 @@ android_app {
 cc_library_shared {
     name: "libxiaomiparts_jni",
     srcs: ["jni/ColorProfilesJNI.cpp"],
+    header_libs: ["jni_headers"], // <--- ADD THIS LINE
     shared_libs: [
         "liblog",
         "libbase",
     ],
     system_ext_specific: true,
 }
+
 
 prebuilt_etc {
     name: "privapp-permissions-parts.xml",
