@@ -19,6 +19,7 @@ android_app {
         "SettingsLib",
         "androidx.core_core-ktx",
         "androidx.activity_activity-compose",
+        "androidx.compose.runtime_runtime",
         "androidx.compose.material3_material3",
         "androidx.compose.ui_ui",
         "androidx.compose.ui_ui-tooling-preview",
@@ -42,14 +43,13 @@ android_app {
 cc_library_shared {
     name: "libxiaomiparts_jni",
     srcs: ["jni/ColorProfilesJNI.cpp"],
-    header_libs: ["jni_headers"], // <--- ADD THIS LINE
+    header_libs: ["jni_headers"],
     shared_libs: [
         "liblog",
         "libbase",
     ],
     system_ext_specific: true,
 }
-
 
 prebuilt_etc {
     name: "privapp-permissions-parts.xml",
