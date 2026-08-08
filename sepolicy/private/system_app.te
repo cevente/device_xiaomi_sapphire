@@ -12,3 +12,6 @@ binder_call(system_app, vold)
 
 # Allow system apps to check supported filesystems
 allow system_app proc_filesystems:file r_file_perms;
+
+# Allow XiaomiParts to access the displayfeature node for color profile tuning
+allow system_app vendor_displayfeature_device:chr_file rw_file_perms;
