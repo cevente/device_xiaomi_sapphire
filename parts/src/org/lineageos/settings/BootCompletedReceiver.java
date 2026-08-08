@@ -7,7 +7,7 @@ import android.content.SharedPreferences;
 import android.util.Log;
 import androidx.preference.PreferenceManager;
 
-import com.xiaomi.parts.display.ColorProfileManager;
+import com.xiaomi.parts.display.CabcManager;
 
 public class BootCompletedReceiver extends BroadcastReceiver {
 
@@ -24,10 +24,10 @@ public class BootCompletedReceiver extends BroadcastReceiver {
 
         SharedPreferences sharedPrefs = PreferenceManager.getDefaultSharedPreferences(context);
 
-        // Hardware Color Profile Restoration
-        int savedCrcMode = sharedPrefs.getInt("hardware_crc_mode", 0); // Default to CRC_OFF (0)
-        boolean crcSuccess = new ColorProfileManager().setProfile(savedCrcMode);
+        // Restore CABC Mode (Default to 0 / Off)
+        int savedCabcMode = sharedPrefs.getInt("lcd_cabc_mode", 0); 
+        boolean cabcSuccess = new CabcManager().setCabc(savedCabcMode);
         
-        if (DEBUG) Log.d(TAG, "Restored CRC Mode: " + savedCrcMode + " | Success: " + crcSuccess);
+        if (DEBUG) Log.d(TAG, "Restored CABC Mode: " + savedCabcMode + " | Success: " + cabcSuccess);
     }
 }
