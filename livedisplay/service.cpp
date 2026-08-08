@@ -35,10 +35,11 @@ using ::aidl::vendor::lineage::livedisplay::AntiFlicker;
 using ::aidl::vendor::lineage::livedisplay::SunlightEnhancement;
 using ::aidl::vendor::lineage::livedisplay::sdm::PictureAdjustment;
 using ::aidl::vendor::lineage::livedisplay::sdm::SDMController;
+using ::vendor::lineage::livedisplay::V1_0::HSIC;
 
 static constexpr const char* kDispFeaturePath = "/dev/mi_display/disp_feature";
 
-// Background worker to monitor refresh rate changes via mi_display and adjust SDM hue
+// Background worker to monitor refresh rate changes via mi_display and adjust SDM hue via HSIC
 void watchRefreshRateAndTune(std::shared_ptr<SDMController> controller) {
     if (!controller) return;
 
@@ -70,13 +71,15 @@ void watchRefreshRateAndTune(std::shared_ptr<SDMController> controller) {
             if (resp->base.type == MI_DISP_EVENT_FPS && resp->base.length >= sizeof(uint32_t)) {
                 uint32_t current_fps = *reinterpret_cast<uint32_t*>(resp->data);
 
+                HSIC hsic;
                 if (current_fps == 90) {
                     LOG(INFO) << "90Hz active: adjusting SDM hue to 5.";
-                    controller->setPictureAdjustment(5.0f, 0.0f, 0.0f, 0.0f);
+                    hsic = {5.0f, 0.0f, 0.0f, 0.0f, 0.0f};
                 } else {
                     LOG(INFO) << "Restoring default SDM profile for " << current_fps << "Hz.";
-                    controller->setPictureAdjustment(0.0f, 0.0f, 0.0f, 0.0f);
+                    hsic = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
                 }
+                controller->setHSIC(hsic);
             }
         }
     }
