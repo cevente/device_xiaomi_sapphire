@@ -11,7 +11,7 @@
 #define MI_DISPLAY_DEVICE "/dev/mi_display/disp_feature"
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_xiaomi_parts_display_ColorProfileManager_nativeSetCrcMode(JNIEnv* env, jobject thiz, jint mode) {
+Java_com_xiaomi_parts_display_CabcManager_nativeSetCabcMode(JNIEnv* env, jobject thiz, jint mode) {
     int fd = open(MI_DISPLAY_DEVICE, O_RDWR);
     if (fd < 0) {
         LOGE("Failed to open %s", MI_DISPLAY_DEVICE);
@@ -20,15 +20,15 @@ Java_com_xiaomi_parts_display_ColorProfileManager_nativeSetCrcMode(JNIEnv* env, 
 
     struct disp_feature_req req;
     memset(&req, 0, sizeof(req));
-    req.base.disp_id = MI_DISP_PRIMARY; 
-    req.feature_id = DISP_FEATURE_CRC;  
+    req.base.disp_id = MI_DISP_PRIMARY; //[span_2](start_span)[span_2](end_span)
+    req.feature_id = DISP_FEATURE_CABC; //[span_3](start_span)[span_3](end_span)
     req.feature_val = mode;
 
-    int ret = ioctl(fd, MI_DISP_IOCTL_SET_FEATURE, &req);
+    int ret = ioctl(fd, MI_DISP_IOCTL_SET_FEATURE, &req); //[span_4](start_span)[span_4](end_span)
     close(fd);
 
     if (ret < 0) {
-        LOGE("Failed to set CRC mode: %d", mode);
+        LOGE("Failed to set CABC mode: %d", mode);
         return JNI_FALSE;
     }
 
