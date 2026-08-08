@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 #include "SunlightEnhancement.h"
-#include "mi_disp.h"
+#include "display/drm/mi_disp.h"
 
 namespace aidl {
 namespace vendor {
@@ -34,7 +34,7 @@ ndk::ScopedAStatus SunlightEnhancement::setEnabled(bool enabled) {
     }
 
     if (enabled) {
-        // Read and store current brightness
+        // Read and store current brightness before engaging HBM
         std::string buf;
         if (android::base::ReadFileToString(kBrightnessPath, &buf)) {
             mStoredBrightness = android::base::Trim(buf);
@@ -65,9 +65,20 @@ ndk::ScopedAStatus SunlightEnhancement::setEnabled(bool enabled) {
     close(fd);
 
     if (!enabled && !mStoredBrightness.empty()) {
-        // Restore previous brightness
-        if (!android::base::WriteStringToFile(mStoredBrightness + "\n", kBrightnessPath)) {
-            LOG(ERROR) << "Failed to restore brightness to " << kBrightnessPath;
+        std::string current_brightness;
+        if (android::base::ReadFileToString(kBrightnessPath, &current_brightness)) {
+            current_brightness = android::base::Trim(current_brightness);
+            
+            // If the brightness was adjusted while HBM was on, respect the new value.
+            // Otherwise, revert to the original stored brightness.
+            std::string target_brightness = (current_brightness != mStoredBrightness) 
+                                            ? current_brightness 
+                                            : mStoredBrightness;
+
+            // Re-write the target to force the panel to exit HBM at the correct level
+            if (!android::base::WriteStringToFile(target_brightness + "\n", kBrightnessPath)) {
+                LOG(ERROR) << "Failed to restore brightness to " << kBrightnessPath;
+            }
         }
         mStoredBrightness.clear();
     }
