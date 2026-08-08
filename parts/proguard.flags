@@ -1,4 +1,4 @@
--keep class com.xiaomi.parts.display.ColorProfileManager { *; }
+-keep class com.xiaomi.parts.display.CabcManager { *; }
 -keepclasseswithmembernames class * {
     native <methods>;
 }
