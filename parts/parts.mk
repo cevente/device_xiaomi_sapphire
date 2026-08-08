@@ -1,1 +1,58 @@
+// Copyright (C) 2023 Paranoid Android
+// SPDX-License-Identifier: Apache-2.0
+
+android_app {
+    name: "XiaomiParts",
+
+    init_rc: ["init/init.xiaomiparts.rc"],
+    srcs: [
+        "src/**/*.java",
+        "src/**/*.kt",
+    ],
+    resource_dirs: ["res"],
+    certificate: "platform",
+    platform_apis: true,
+    system_ext_specific: true,
+    privileged: true,
+
+    static_libs: [
+        "SettingsLib",
+        "androidx.core_core-ktx",
+        "androidx.activity_activity-compose",
+        "androidx.compose.material3_material3",
+        "androidx.compose.ui_ui",
+        "androidx.compose.ui_ui-tooling-preview",
+        "androidx.compose.foundation_foundation",
+        "androidx.preference_preference",
+    ],
+
+    jni_libs: [
+        "libxiaomiparts_jni",
+    ],
+
+    required: [
+        "privapp-permissions-parts.xml",
+    ],
+
+    optimize: {
+        proguard_flags_files: ["proguard.flags"],
+    },
+}
+
+cc_library_shared {
+    name: "libxiaomiparts_jni",
+    srcs: ["jni/ColorProfilesJNI.cpp"],
+    shared_libs: [
+        "liblog",
+        "libbase",
+    ],
+    system_ext_specific: true,
+}
+
+prebuilt_etc {
+    name: "privapp-permissions-parts.xml",
+    src: "privapp-permissions-parts.xml",
+    sub_dir: "permissions",
+    system_ext_specific: true,
+}
 
