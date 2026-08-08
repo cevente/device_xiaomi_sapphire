@@ -1,2 +1,0 @@
-# Allow XiaomiParts to access the displayfeature node for color profile tuning
-allow system_app vendor_displayfeature_device:chr_file rw_file_perms;
