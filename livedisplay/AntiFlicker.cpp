@@ -24,7 +24,7 @@
 #include <unistd.h>
 
 #include "AntiFlicker.h"
-#include "display/drm/mi_disp.h"
+#include "mi_disp.h"
 
 namespace aidl {
 namespace vendor {
