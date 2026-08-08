@@ -1,2 +1,2 @@
 # Allow XiaomiParts to access the mi_disp character node for color profile tuning
-allow system_app display_device:chr_file rw_file_perms;
+allow system_app mi_display_device:chr_file rw_file_perms;
