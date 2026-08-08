@@ -8,7 +8,7 @@
 
 #define LOG_TAG "XiaomiParts-JNI"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-#define MI_DISPLAY_DEVICE "/dev/mi_display"
+#define MI_DISPLAY_DEVICE "/dev/mi_display/disp_feature"
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_xiaomi_parts_display_ColorProfileManager_nativeSetCrcMode(JNIEnv* env, jobject thiz, jint mode) {
