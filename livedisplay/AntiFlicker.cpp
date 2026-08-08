@@ -1,4 +1,11 @@
 /*
+ * Copyright (C) 2026 Cedric Loste
+ *
+ * Based on original LineageOS LiveDisplay codes
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * Copyright (C) 2020 The LineageOS Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
