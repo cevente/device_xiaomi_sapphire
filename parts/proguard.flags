@@ -1,4 +1,4 @@
--keep class com.xiaomi.parts.display.CabcManager { *; }
+-keep class com.xiaomi.parts.touch.TouchManager { *; }
 -keepclasseswithmembernames class * {
     native <methods>;
 }
