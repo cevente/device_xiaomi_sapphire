@@ -26,11 +26,9 @@ android_app {
         "androidx.preference_preference",
     ],
 
-    jni_libs: [
-        "xiaomiparts_touch_jni",
-    ],
-
+    // Intentionally omitted from jni_libs to prevent APK embedding failures.
     required: [
+        "libxiaomiparts_touch_jni",
         "privapp-permissions-parts.xml",
     ],
 
@@ -40,13 +38,13 @@ android_app {
 }
 
 cc_library_shared {
-    name: "xiaomiparts_touch_jni",
+    name: "libxiaomiparts_touch_jni",
     srcs: ["jni/XiaomiTouchJNI.cpp"],
     header_libs: ["jni_headers"],
     shared_libs: [
-        "liblog", // Removed libbase
+        "liblog",
     ],
-    // Removed system_ext_specific: true to force embedding into the APK
+    system_ext_specific: true,
 }
 
 prebuilt_etc {
