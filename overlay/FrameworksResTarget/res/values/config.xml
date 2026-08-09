@@ -77,6 +77,10 @@
     <!-- Path to fast charging status file to detect whether an oem fast charger is active -->
     <string name="config_oemFastChargerStatusPath" translatable="false">/sys/class/qcom-battery/fastcharge_mode</string>
 
+    <string name="config_qualified_networks_service_package">vendor.qti.iwlan</string>
+    <string name="config_wlan_data_service_package">vendor.qti.iwlan</string>
+    <string name="config_wlan_network_service_package">vendor.qti.iwlan</string>
+     
     <!-- ==================== STRING ARRAYS ==================== -->
 
     <!-- Default files to pin via Pinner Service -->
@@ -85,8 +89,12 @@
         <item>"/apex/com.android.art/javalib/core-libart.jar"</item>
         <item>"/system/bin/surfaceflinger"</item>
         <item>"/system/framework/framework.jar"</item>
-        <item>"/system/framework/services.jar"</item>
+        <item>"/system/framework/services.jar"</item>     
         <item>"/system_ext/priv-app/SystemUI/SystemUI.apk"</item>
     </string-array>
-
+     
+     <string-array name="config_tether_wifi_regexs">
+        <item>softap0</item>
+        <item>wigig0</item>
+    </string-array>
 </resources>
