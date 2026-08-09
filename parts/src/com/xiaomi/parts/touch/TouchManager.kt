@@ -14,7 +14,7 @@ class TouchManager {
 
         init {
             try {
-                // Fixed: Do not include the "lib" prefix here; Android appends it automatically.
+                // Loads /system_ext/lib64/libxiaomiparts_touch_jni.so dynamically
                 System.loadLibrary("xiaomiparts_touch_jni")
             } catch (e: UnsatisfiedLinkError) {
                 Log.e(TAG, "Failed to load touch jni library", e)
