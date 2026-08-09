@@ -90,7 +90,7 @@
     <bool name="config_pocketModeLightSensorSupported">false</bool>
 
     <!-- Whether pocket mode is supported -->
-    <bool name="config_pocketModeSupported">true</bool>
+    <bool name="config_pocketModeSupported">false</bool>
 
     <!-- Whether pocket mode uses light sensor -->
     <bool name="config_pocketUseLightSensor">false</bool>
