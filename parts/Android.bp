@@ -4,7 +4,7 @@
 android_app {
     name: "XiaomiParts",
 
-    // init_rc: ["init/init.xiaomiparts.rc"],
+    init_rc: ["init/init.xiaomiparts.rc"],
     srcs: [
         "src/**/*.java",
         "src/**/*.kt",
@@ -44,10 +44,9 @@ cc_library_shared {
     srcs: ["jni/XiaomiTouchJNI.cpp"],
     header_libs: ["jni_headers"],
     shared_libs: [
-        "liblog",
-        "libbase",
+        "liblog", // Removed libbase
     ],
-    system_ext_specific: true,
+    // Removed system_ext_specific: true to force embedding into the APK
 }
 
 prebuilt_etc {
