@@ -17,10 +17,6 @@
         <item>usb\\d</item>
         <item>rndis\\d</item>
     </string-array>
-    <string-array name="config_tether_wifi_regexs">
-        <item>softap0</item>
-        <item>wlan0</item>
-    </string-array>
     <string-array name="networkAttributes">
         <item>wifi,1,1,1,-1,true</item>
         <item>mobile,0,0,0,-1,true</item>
