@@ -40,7 +40,7 @@ android_app {
 }
 
 cc_library_shared {
-    name: "libxiaomiparts_touch_jni",
+    name: "xiaomiparts_touch_jni",
     srcs: ["jni/XiaomiTouchJNI.cpp"],
     header_libs: ["jni_headers"],
     shared_libs: [
