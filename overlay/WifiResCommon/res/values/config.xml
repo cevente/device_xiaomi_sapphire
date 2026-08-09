@@ -17,7 +17,7 @@
     <bool name="config_vendorWifi11axReadySupport">true</bool>
     <bool name="config_vendor_wifi_softap_owe_supported">true</bool>
     <bool name="config_wifi5ghzSupport">true</bool>
-    <bool name="config_wifi6ghzSupport">true</bool>
+    <bool name="config_wifi6ghzSupport">false</bool>
     <bool name="config_wifiAllowMultipleNetworksOnSameAwareNdi">true</bool>
     <bool name="config_wifiApplicationCentricQosPolicyFeatureEnabled">true</bool>
     <bool name="config_wifiConnectedFrequencyEnhancementEnabled">true</bool>
@@ -28,7 +28,7 @@
     <bool name="config_wifiSaeH2eSupported">true</bool>
     <bool name="config_wifiSaeUpgradeOffloadEnabled">true</bool>
     <bool name="config_wifiSoftApDynamicCountryCodeUpdateSupported">true</bool>
-    <bool name="config_wifiSoftap6ghzSupported">true</bool>
+    <bool name="config_wifiSoftap6ghzSupported">false</bool>
     <bool name="config_wifiSoftapAcsIncludeDfs">true</bool>
     <bool name="config_wifiSoftapAutoUpgradeToBridgedConfigWhenSupported">false</bool>
     <bool name="config_wifiSoftapHeSuBeamformeeSupported">true</bool>
