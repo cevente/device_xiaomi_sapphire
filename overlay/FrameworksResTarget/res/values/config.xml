@@ -6,7 +6,9 @@
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
 
     <!-- ==================== BOOLS ==================== -->
-
+     
+    <bool name="config_deviceSupportsHighPerfTransitions">false</bool>
+     
     <!-- Control whether the always on display mode is available. This should only be enabled on
          devices where the display has been tuned to be power efficient in DOZE and/or DOZE_SUSPEND
          states. -->
