@@ -673,4 +673,4 @@ PRODUCT_PACKAGES += \
     firmware_wlanmdsp.mbn_symlink
     
 # XiaomiParts
-$(call inherit-product, device/xiaomi/sapphire/parts/parts.mk)
+# $(call inherit-product, device/xiaomi/sapphire/parts/parts.mk)
