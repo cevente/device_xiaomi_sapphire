@@ -76,7 +76,9 @@
 
     <!-- Path to fast charging status file to detect whether an oem fast charger is active -->
     <string name="config_oemFastChargerStatusPath" translatable="false">/sys/class/qcom-battery/fastcharge_mode</string>
-
+    <!-- OEM fast charger status value -->
+    <string name="config_oemFastChargerStatusValue">1</string>
+     
     <string name="config_qualified_networks_service_package">vendor.qti.iwlan</string>
     <string name="config_wlan_data_service_package">vendor.qti.iwlan</string>
     <string name="config_wlan_network_service_package">vendor.qti.iwlan</string>
