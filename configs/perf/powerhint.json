@@ -713,13 +713,13 @@
       "PowerHint": "LAUNCH",
       "Node": "GPUForceClkOn",
       "Duration": 1500,
-      "Value": "1"
+      "Value": "0"
     },
     {
       "PowerHint": "LAUNCH",
       "Node": "GPUForceRailOn",
       "Duration": 1500,
-      "Value": "1"
+      "Value": "0"
     },
     {
       "PowerHint": "LAUNCH",
