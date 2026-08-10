@@ -27,3 +27,7 @@ allow vendor_qti_init_shell cgroup:file { getattr };
 allow vendor_qti_init_shell sysfs_batteryinfo:file { getattr setattr read write open };
 
 allow vendor_qti_init_shell sysfs:file { getattr setattr read write open };
+
+allow vendor_qti_init_shell cgroup:file read;
+allow vendor_qti_init_shell vendor_sysfs_memory:file write;
+allow vendor_qti_init_shell vendor_sysfs_scsi_host:file write;
