@@ -107,72 +107,6 @@
       "ResetOnInit": true
     },
     {
-      "Name": "SchedInitTaskLoad",
-      "Path": "/proc/sys/walt/sched_init_task_load",
-      "Values": ["1", "10", "20"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedAsymcapBoost",
-      "Path": "/proc/sys/walt/sched_asymcap_boost",
-      "Values": ["0", "1", "2"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedConservativePL",
-      "Path": "/proc/sys/walt/sched_conservative_pl",
-      "Values": ["0", "1"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedEarlyUpMigrate",
-      "Path": "/proc/sys/walt/sched_early_upmigrate",
-      "Values": ["0", "1"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedEarlyDownMigrate",
-      "Path": "/proc/sys/walt/sched_early_downmigrate",
-      "Values": ["0", "1"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedEDBoost",
-      "Path": "/proc/sys/walt/sched_ed_boost",
-      "Values": ["0", "1", "2"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedLowLatency",
-      "Path": "/proc/sys/walt/sched_low_latency",
-      "Values": ["0", "1"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedSyncHint",
-      "Path": "/proc/sys/walt/sched_sync_hint_enable",
-      "Values": ["0", "1"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedWindowStats",
-      "Path": "/proc/sys/walt/sched_window_stats_policy",
-      "Values": ["0", "1", "2"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedPerTaskBoost",
-      "Path": "/proc/sys/walt/sched_per_task_boost",
-      "Values": ["0", "1"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedPerTaskBoostPeriod",
-      "Path": "/proc/sys/walt/sched_per_task_boost_period_ms",
-      "Values": ["0", "500", "1000"],
-      "ResetOnInit": true
-    },
-    {
       "Name": "SchedBusyHystNs",
       "Path": "/proc/sys/walt/sched_busy_hyst_ns",
       "Values": ["99000000", "3000000", "0"],
@@ -200,6 +134,12 @@
       "Name": "SchedMinTaskUtilForUclamp",
       "Path": "/proc/sys/walt/sched_min_task_util_for_uclamp",
       "Values": ["0", "35", "40"],
+      "ResetOnInit": true
+    },
+    {
+      "Name": "SchedAsymcapBoost",
+      "Path": "/proc/sys/walt/sched_asymcap_boost",
+      "Values": ["0", "1", "2"],
       "ResetOnInit": true
     },
     {
@@ -239,12 +179,6 @@
       "ResetOnInit": true
     },
     {
-      "Name": "InputBoostFreq",
-      "Path": "/proc/sys/walt/input_boost/input_boost_freq",
-      "Values": ["0", "1344000", "1766400"],
-      "ResetOnInit": true
-    },
-    {
       "Name": "InputBoostMs",
       "Path": "/proc/sys/walt/input_boost/input_boost_ms",
       "Values": ["0", "40", "80", "150"],
@@ -254,12 +188,6 @@
       "Name": "SchedBoostOnInput",
       "Path": "/proc/sys/walt/input_boost/sched_boost_on_input",
       "Values": ["0", "1"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "PowerkeyInputBoostFreq",
-      "Path": "/proc/sys/walt/input_boost/powerkey_input_boost_freq",
-      "Values": ["0", "1344000", "1766400"],
       "ResetOnInit": true
     },
     {
@@ -327,60 +255,6 @@
       "Name": "CPUBWMinFreq",
       "Path": "/sys/devices/system/cpu/bus_dcvs/DDR/boost_freq",
       "Values": ["2092000", "1804000", "1555000", "1017000", "768000", "547000", "200000"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedClusterUtilThres",
-      "Path": "/proc/sys/walt/sched_cluster_util_thres_pct",
-      "Values": ["0", "80", "90"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedAsymCapMatchPct",
-      "Path": "/proc/sys/walt/sched_asym_cap_sibling_freq_match_pct",
-      "Values": ["0", "80", "90"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedHeavyNr",
-      "Path": "/proc/sys/walt/sched_heavy_nr",
-      "Values": ["0", "1", "2"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedUtilBusyHystCPU",
-      "Path": "/proc/sys/walt/sched_util_busy_hyst_cpu_ns",
-      "Values": ["0", "1000000", "3000000"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedUtilBusyHystCPUEnable",
-      "Path": "/proc/sys/walt/sched_util_busy_hysteresis_enable_cpus",
-      "Values": ["0", "15", "255"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedWakeUpIdle",
-      "Path": "/proc/sys/walt/sched_wake_up_idle",
-      "Values": ["0", "1"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "SchedRavgWindow",
-      "Path": "/proc/sys/walt/sched_ravg_window_nr_ticks",
-      "Values": ["4", "8", "16"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "TaskLoadBoost",
-      "Path": "/proc/sys/walt/task_load_boost",
-      "Values": ["0", "1", "2"],
-      "ResetOnInit": true
-    },
-    {
-      "Name": "WaltLowLatencyTaskThreshold",
-      "Path": "/proc/sys/walt/walt_low_latency_task_threshold",
-      "Values": ["0", "10", "20"],
       "ResetOnInit": true
     }
   ],
@@ -549,12 +423,6 @@
     },
     {
       "PowerHint": "INTERACTION",
-      "Node": "InputBoostFreq",
-      "Duration": 0,
-      "Value": "1344000"
-    },
-    {
-      "PowerHint": "INTERACTION",
       "Node": "InputBoostMs",
       "Duration": 0,
       "Value": "80"
@@ -564,18 +432,6 @@
       "Node": "SchedBoostOnInput",
       "Duration": 0,
       "Value": "0"
-    },
-    {
-      "PowerHint": "INTERACTION",
-      "Node": "SchedSyncHint",
-      "Duration": 0,
-      "Value": "1"
-    },
-    {
-      "PowerHint": "INTERACTION",
-      "Node": "SchedLowLatency",
-      "Duration": 0,
-      "Value": "1"
     },
     {
       "PowerHint": "INTERACTION",
@@ -783,12 +639,6 @@
     },
     {
       "PowerHint": "LAUNCH",
-      "Node": "InputBoostFreq",
-      "Duration": 0,
-      "Value": "1766400"
-    },
-    {
-      "PowerHint": "LAUNCH",
       "Node": "InputBoostMs",
       "Duration": 0,
       "Value": "80"
@@ -798,12 +648,6 @@
       "Node": "SchedBoostOnInput",
       "Duration": 0,
       "Value": "0"
-    },
-    {
-      "PowerHint": "LAUNCH",
-      "Node": "SchedSyncHint",
-      "Duration": 0,
-      "Value": "1"
     },
     {
       "PowerHint": "LAUNCH",
@@ -882,12 +726,6 @@
       "Node": "SchedDownMigrate",
       "Duration": 0,
       "Value": "75"
-    },
-    {
-      "PowerHint": "EXPENSIVE_RENDERING",
-      "Node": "InputBoostFreq",
-      "Duration": 0,
-      "Value": "1344000"
     },
     {
       "PowerHint": "EXPENSIVE_RENDERING",
