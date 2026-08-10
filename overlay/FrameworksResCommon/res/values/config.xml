@@ -383,7 +383,7 @@
     <bool name="config_enhanced_iwlan_handover_check">false</bool>
 
     <!-- Whether to enable Lineage Health Service -->
-    <bool name="config_lineageHealthSupported">false</bool>
+    <bool name="config_lineageHealthSupported">true</bool>
 
     <!-- Whether WiFi display is supported by this device.
          There are many prerequisites for this feature to work correctly.
