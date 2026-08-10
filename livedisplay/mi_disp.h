@@ -56,7 +56,7 @@ enum disp_feature_id {
 	DISP_FEATURE_BACKLIGHT = 23,
 	DISP_FEATURE_BRIGHTNESS = 24,
 	DISP_FEATURE_LCD_HBM = 25,
-	DISP_FEATURE_DOZE_STATE =26,
+	DISP_FEATURE_DOZE_STATE = 26,
 	DISP_FEATURE_PEAK_HDR_MODE = 27,
 	DISP_FEATURE_CABC = 28,
 	DISP_FEATURE_BIST_MODE = 29,
@@ -65,6 +65,12 @@ enum disp_feature_id {
 	DISP_FEATURE_GAMUT = 32,
 	DISP_FEATURE_POWERSTATUS = 33,
 	DISP_FEATURE_SYSTEM_BUILD_VERSION = 34,
+	/* New features */
+	DISP_FEATURE_QSYNC = 35,
+	DISP_FEATURE_RESOLUTION_SWITCH = 36,
+	DISP_FEATURE_MODE_SWITCH = 37,
+	DISP_FEATURE_EM_CYCLE_16PULSE = 38,
+	DISP_FEATURE_DOZE_TO_OFF = 39,
 	DISP_FEATURE_MAX,
 };
 
@@ -117,6 +123,8 @@ enum lcd_hbm_level {
 	LCD_HBM_L1_ON = 1,
 	LCD_HBM_L2_ON = 2,
 	LCD_HBM_L3_ON = 3,
+	LCD_HBM_L4_ON = 4,
+	LCD_HBM_L5_ON = 5,
 	LCD_HBM_MAX,
 };
 
@@ -144,6 +152,40 @@ enum cabc_status {
 	LCD_CABC_UI_ON = 1,
 	LCD_CABC_MOVIE_ON = 2,
 	LCD_CABC_STILL_ON = 3,
+};
+
+/* feature_id: DISP_FEATURE_QSYNC corresponding feature_val */
+enum qsync_state {
+	QSYNC_OFF = 0,
+	QSYNC_ON  = 1,
+};
+
+/* feature_id: DISP_FEATURE_RESOLUTION_SWITCH corresponding feature_val */
+enum resolution_switch_cmd {
+	RES_SWITCH_PRE = 0,   /* pre-res-switch */
+	RES_SWITCH_SET = 1,   /* res-switch */
+	RES_SWITCH_POST = 2,  /* post-res-switch */
+};
+
+/* feature_id: DISP_FEATURE_MODE_SWITCH corresponding feature_val */
+enum mode_switch_cmd {
+	MODE_SWITCH_VIDEO_IN = 0,   /* video-mode-switch-in */
+	MODE_SWITCH_VIDEO_OUT = 1,  /* video-mode-switch-out */
+	MODE_SWITCH_CMD_IN = 2,     /* cmd-mode-switch-in */
+	MODE_SWITCH_CMD_OUT = 3,    /* cmd-mode-switch-out */
+};
+
+/* feature_id: DISP_FEATURE_EM_CYCLE_16PULSE corresponding feature_val */
+enum em_cycle_16pulse_state {
+	EM_16PULSE_OFF = 0,
+	EM_16PULSE_ON  = 1,
+};
+
+/* feature_id: DISP_FEATURE_DOZE_TO_OFF corresponding feature_val */
+/* Simple on/off, but could be extended */
+enum doze_to_off_state {
+	DOZE_TO_OFF_DISABLE = 0,
+	DOZE_TO_OFF_ENABLE  = 1,
 };
 
 struct disp_base {
@@ -558,6 +600,16 @@ static inline const char *get_disp_feature_id_name(__u32 feature_id)
 		return "power_status";
 	case DISP_FEATURE_SYSTEM_BUILD_VERSION:
 		return "system_build_version";
+	case DISP_FEATURE_QSYNC:
+		return "qsync";
+	case DISP_FEATURE_RESOLUTION_SWITCH:
+		return "resolution_switch";
+	case DISP_FEATURE_MODE_SWITCH:
+		return "mode_switch";
+	case DISP_FEATURE_EM_CYCLE_16PULSE:
+		return "em_cycle_16pulse";
+	case DISP_FEATURE_DOZE_TO_OFF:
+		return "doze_to_off";
 	default:
 		return "Unknown";
 	}
@@ -818,6 +870,16 @@ static inline const char *getDispFeatureIdName(__u32 feature_id)
 		return "power_status";
 	case DISP_FEATURE_SYSTEM_BUILD_VERSION:
 		return "system_build_version";
+	case DISP_FEATURE_QSYNC:
+		return "qsync";
+	case DISP_FEATURE_RESOLUTION_SWITCH:
+		return "resolution_switch";
+	case DISP_FEATURE_MODE_SWITCH:
+		return "mode_switch";
+	case DISP_FEATURE_EM_CYCLE_16PULSE:
+		return "em_cycle_16pulse";
+	case DISP_FEATURE_DOZE_TO_OFF:
+		return "doze_to_off";
 	default:
 		return "Unknown";
 	}
