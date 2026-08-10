@@ -5,19 +5,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/*
- * SPDX-FileCopyrightText: 2019-2025 The LineageOS Project
- * SPDX-License-Identifier: Apache-2.0
- */
-
 #define LOG_TAG "SunlightEnhancementService"
+
+#include <chrono>
+#include <cstdlib>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/strings.h>
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
 
 #include "SunlightEnhancement.h"
 #include "mi_disp.h"
@@ -29,10 +27,133 @@ namespace livedisplay {
 
 static constexpr const char* kDispFeaturePath = "/dev/mi_display/disp_feature";
 static constexpr const char* kBrightnessPath = "/sys/class/backlight/panel0-backlight/brightness";
+static constexpr const char* kScreenStatePath = "/sys/class/thermal/thermal_message/screen_state";
+
+SunlightEnhancement::SunlightEnhancement() {
+    mMonitorThread = std::thread(&SunlightEnhancement::monitorScreenState, this);
+}
+
+SunlightEnhancement::~SunlightEnhancement() {
+    mStopThread = true;
+    if (mMonitorThread.joinable()) {
+        mMonitorThread.join();
+    }
+}
 
 ndk::ScopedAStatus SunlightEnhancement::getEnabled(bool* _aidl_return) {
     *_aidl_return = mEnabled;
     return ndk::ScopedAStatus::ok();
+}
+
+uint32_t SunlightEnhancement::getBrightness() {
+    int fd = open(kDispFeaturePath, O_RDWR);
+    if (fd >= 0) {
+        struct disp_brightness_req req;
+        memset(&req, 0, sizeof(req));
+        req.base.disp_id = MI_DISP_PRIMARY;
+
+        if (ioctl(fd, MI_DISP_IOCTL_GET_BRIGHTNESS, &req) == 0 && req.brightness > 0) {
+            close(fd);
+            return req.brightness;
+        }
+        close(fd);
+    }
+
+    // Fallback to sysfs reading if IOCTL fails
+    std::string buf;
+    if (android::base::ReadFileToString(kBrightnessPath, &buf)) {
+        return static_cast<uint32_t>(std::strtoul(android::base::Trim(buf).c_str(), nullptr, 10));
+    }
+
+    LOG(ERROR) << "Failed to read brightness via IOCTL and sysfs";
+    return 0;
+}
+
+void SunlightEnhancement::setBrightness(uint32_t level) {
+    if (level == 0) return;
+
+    int fd = open(kDispFeaturePath, O_RDWR);
+    if (fd >= 0) {
+        struct disp_brightness_req req;
+        memset(&req, 0, sizeof(req));
+        req.base.disp_id = MI_DISP_PRIMARY;
+        req.brightness = level;
+
+        if (ioctl(fd, MI_DISP_IOCTL_SET_BRIGHTNESS, &req) == 0) {
+            close(fd);
+            return;
+        }
+        close(fd);
+    }
+
+    // Fallback to sysfs writing if IOCTL fails
+    std::string levelStr = std::to_string(level) + "\n";
+    if (!android::base::WriteStringToFile(levelStr, kBrightnessPath)) {
+        LOG(ERROR) << "Failed to write target brightness to " << kBrightnessPath;
+    }
+}
+
+void SunlightEnhancement::applyHbm(bool enabled) {
+    int fd = open(kDispFeaturePath, O_RDWR);
+    if (fd < 0) {
+        LOG(ERROR) << "Failed to open " << kDispFeaturePath;
+        return;
+    }
+
+    struct disp_feature_req req;
+    
+    // 1. Toggle Standard Global HBM using nested base struct layout
+    memset(&req, 0, sizeof(req));
+    req.base.flag = MI_DISP_FLAG_BLOCK;
+    req.base.disp_id = MI_DISP_PRIMARY;
+    req.feature_id = DISP_FEATURE_HBM;
+    req.feature_val = enabled ? 1 : 0;
+    req.tx_len = 0;
+    req.tx_ptr = 0;
+    req.rx_len = 0;
+    req.rx_ptr = 0;
+
+    if (ioctl(fd, MI_DISP_IOCTL_SET_FEATURE, &req) < 0) {
+        LOG(ERROR) << "IOCTL MI_DISP_IOCTL_SET_FEATURE failed for standard HBM";
+    }
+
+    // 2. Toggle Stepped HBM (LCD_HBM) level for aggressive panel sunlight boost (Level 3)
+    memset(&req, 0, sizeof(req));
+    req.base.flag = MI_DISP_FLAG_BLOCK;
+    req.base.disp_id = MI_DISP_PRIMARY;
+    req.feature_id = DISP_FEATURE_LCD_HBM;
+    req.feature_val = enabled ? LCD_HBM_L3_ON : LCD_HBM_OFF;
+    req.tx_len = 0;
+    req.tx_ptr = 0;
+    req.rx_len = 0;
+    req.rx_ptr = 0;
+
+    if (ioctl(fd, MI_DISP_IOCTL_SET_FEATURE, &req) < 0) {
+        LOG(DEBUG) << "IOCTL MI_DISP_IOCTL_SET_FEATURE for LCD_HBM failed or unhandled";
+    }
+
+    close(fd);
+}
+
+void SunlightEnhancement::monitorScreenState() {
+    int lastState = -1;
+
+    while (!mStopThread) {
+        std::string buf;
+        if (android::base::ReadFileToString(kScreenStatePath, &buf)) {
+            buf = android::base::Trim(buf);
+            int currentState = (buf == "1") ? 1 : 0;
+
+            // Re-enforce HBM when screen transitions from OFF (0) to ON (1)
+            if (lastState == 0 && currentState == 1 && mEnabled) {
+                LOG(INFO) << "Screen turned on, re-enforcing stepped HBM";
+                applyHbm(true);
+            }
+            lastState = currentState;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
 }
 
 ndk::ScopedAStatus SunlightEnhancement::setEnabled(bool enabled) {
@@ -41,53 +162,23 @@ ndk::ScopedAStatus SunlightEnhancement::setEnabled(bool enabled) {
     }
 
     if (enabled) {
-        // Read and store current brightness before engaging HBM
-        std::string buf;
-        if (android::base::ReadFileToString(kBrightnessPath, &buf)) {
-            mStoredBrightness = android::base::Trim(buf);
-        } else {
-            LOG(ERROR) << "Failed to read current brightness from " << kBrightnessPath;
-        }
+        // Cache pre-HBM brightness state cleanly in memory via IOCTL
+        mStoredBrightness = getBrightness();
     }
 
-    // Apply HBM via IOCTL
-    int fd = open(kDispFeaturePath, O_RDWR);
-    if (fd < 0) {
-        LOG(ERROR) << "Failed to open " << kDispFeaturePath;
-        return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
-    }
+    // Apply Stepped HBM and global features via IOCTL
+    applyHbm(enabled);
 
-    struct disp_feature_req req;
-    memset(&req, 0, sizeof(req));
-    req.base.disp_id = MI_DISP_PRIMARY;
-    req.feature_id = DISP_FEATURE_HBM;
-    req.feature_val = enabled ? FEATURE_ON : FEATURE_OFF;
+    if (!enabled && mStoredBrightness > 0) {
+        uint32_t currentBrightness = getBrightness();
 
-    if (ioctl(fd, MI_DISP_IOCTL_SET_FEATURE, &req) < 0) {
-        LOG(ERROR) << "IOCTL MI_DISP_IOCTL_SET_FEATURE failed for HBM";
-        close(fd);
-        return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
-    }
+        // Restore user brightness if modified during HBM; otherwise restore initial level
+        uint32_t targetBrightness = (currentBrightness != 0 && currentBrightness != mStoredBrightness)
+                                         ? currentBrightness
+                                         : mStoredBrightness;
 
-    close(fd);
-
-    if (!enabled && !mStoredBrightness.empty()) {
-        std::string current_brightness;
-        if (android::base::ReadFileToString(kBrightnessPath, &current_brightness)) {
-            current_brightness = android::base::Trim(current_brightness);
-            
-            // If the brightness was adjusted while HBM was on, respect the new value.
-            // Otherwise, revert to the original stored brightness.
-            std::string target_brightness = (current_brightness != mStoredBrightness) 
-                                            ? current_brightness 
-                                            : mStoredBrightness;
-
-            // Re-write the target to force the panel to exit HBM at the correct level
-            if (!android::base::WriteStringToFile(target_brightness + "\n", kBrightnessPath)) {
-                LOG(ERROR) << "Failed to restore brightness to " << kBrightnessPath;
-            }
-        }
-        mStoredBrightness.clear();
+        setBrightness(targetBrightness);
+        mStoredBrightness = 0;
     }
 
     mEnabled = enabled;
