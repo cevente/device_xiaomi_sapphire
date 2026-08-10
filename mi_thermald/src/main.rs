@@ -5,6 +5,8 @@
 #![allow(missing_docs)]
 #![allow(clippy::needless_range_loop)]
 #![allow(clippy::collapsible_else_if)]
+#![allow(unused_variables)]
+#![allow(unused_assignments)]
 
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -132,8 +134,8 @@ impl SysfsNode {
             return;
         }
         let _ = self.file.set_len(0);
-        
-        let val_str = format!("{}\n", value); 
+
+        let val_str = format!("{}\n", value);
         if let Err(e) = self.file.write_all(val_str.as_bytes()) {
             eprintln!("Failed to write {} to {}: {}", value, self.path, e);
         }
@@ -145,9 +147,9 @@ impl SysfsNode {
             eprintln!("Failed to seek {}: {}", self.path, e);
             return;
         }
-        let _ = self.file.set_len(0); 
-        
-        let val_str = format!("{}\n", value); 
+        let _ = self.file.set_len(0);
+
+        let val_str = format!("{}\n", value);
         if let Err(e) = self.file.write_all(val_str.as_bytes()) {
             eprintln!("Failed to write string to {}: {}", self.path, e);
         }
@@ -221,7 +223,7 @@ fn main() {
     write_opt!(node_res_chg, 0);
     write_opt!(node_res_cur, 1500000);
     write_opt!(node_input_suspend, 0); // Ensure charge is active on startup
-    
+
     // Initial WALT state
     write_str_opt!(node_walt_ms, "80");
     write_str_opt!(node_walt_boost, BOOST_ENABLED_STR);
@@ -232,10 +234,10 @@ fn main() {
     let mut state_cpu4: usize = 0;
     let mut state_gpu: usize = 0;
     let mut state_tstate: usize = 0;
-    
+
     // Backlight clamp state
     let mut state_backlight_clamped: bool = false;
-    
+
     let mut state_wifi: i32 = 0;
     let mut state_boost: i32 = 1;
     let mut state_ccc_hotplug: bool = false;
@@ -387,7 +389,7 @@ fn main() {
 
         // ── CDSP (Camera/Compute) Control ─────────────────────────────
         let mut new_cdsp = state_cdsp;
-        
+
         if t_hvx >= 52000 {
             new_cdsp = 5;
         } else if t_hvx >= 50000 {
@@ -439,10 +441,12 @@ fn main() {
         // ── Backlight (Direct Hardware Clamp) ─────────────────────────────
         if virtual_temp >= 51000 {
             let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
-            
+
             if current_bl > BL_LIMIT {
-                println!("[BACKLIGHT] Critical Temp (51°C) - Clamping brightness from {} to {}", 
-                         current_bl, BL_LIMIT);
+                println!(
+                    "[BACKLIGHT] Critical Temp (51°C) - Clamping brightness from {} to {}",
+                    current_bl, BL_LIMIT
+                );
                 write_opt!(node_backlight, BL_LIMIT);
                 state_backlight_clamped = true;
             }
@@ -463,7 +467,7 @@ fn main() {
         }
 
         // ── WALT Input Boost (Proactive) ─────────────────────────────────
-        let should_disable_boost = (virtual_temp >= 48000) 
+        let should_disable_boost = (virtual_temp >= 48000)
             || (virtual_temp >= PROACTIVE_BOOST_TEMP_THRESHOLD && is_thermal_spike);
 
         if should_disable_boost && state_boost == 1 {
@@ -527,9 +531,9 @@ fn main() {
                     let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
 
                     let mut restrict_cur = if t_battery >= 38500 || virtual_temp >= 44500 {
-                        200000  // Hard Limit: Minimal intake to force cooling under 38.5°C
+                        200000 // Hard Limit: Minimal intake to force cooling under 38.5°C
                     } else if t_battery >= 37800 || virtual_temp >= 43000 {
-                        500000  // 0.5A - Thermal brake floor
+                        500000 // 0.5A - Thermal brake floor
                     } else if t_battery >= 36500 || virtual_temp >= 41000 {
                         1000000 // 1.0A - Pre-emptive check step
                     } else if t_battery >= 35000 || virtual_temp >= 39000 {
@@ -537,7 +541,7 @@ fn main() {
                     } else if t_battery >= 33500 || virtual_temp >= 37000 {
                         2000000 // 2.0A - High intake
                     } else if is_thermal_spike {
-                        800000  // Rapid heat rise protection: clamp to 0.8A
+                        800000 // Rapid heat rise protection: clamp to 0.8A
                     } else {
                         2500000 // 2.5A - Max screen-on intake when cool
                     };
@@ -575,7 +579,10 @@ fn main() {
                         write_opt!(node_res_cur, 1200000);
                     } else {
                         if restricted {
-                            println!("[CHG-XIAOMI] Battery cooled to {}°C - exiting direct restriction", batt_temp);
+                            println!(
+                                "[CHG-XIAOMI] Battery cooled to {}°C - exiting direct restriction",
+                                batt_temp
+                            );
                             restricted = false;
                         }
 
@@ -604,17 +611,17 @@ fn main() {
                     let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
 
                     let mut restrict_cur = if t_battery >= 38500 || virtual_temp >= 44500 {
-                        200000  // Hard Limit
+                        200000 // Hard Limit
                     } else if t_battery >= 37800 || virtual_temp >= 42500 {
-                        400000  // 0.4A - Severe buck heat mitigation
+                        400000 // 0.4A - Severe buck heat mitigation
                     } else if t_battery >= 36500 || virtual_temp >= 41000 {
-                        700000  // 0.7A
+                        700000 // 0.7A
                     } else if t_battery >= 35000 || virtual_temp >= 39000 {
                         1000000 // 1.0A
                     } else if t_battery >= 33500 || virtual_temp >= 37000 {
                         1300000 // 1.3A
                     } else if is_thermal_spike {
-                        700000  // Clamp on rapid heat rise
+                        700000 // Clamp on rapid heat rise
                     } else {
                         1600000 // 1.6A max screen-on intake when cool
                     };
@@ -627,11 +634,11 @@ fn main() {
                 } else {
                     // Screen OFF
                     let restrict_cur = if t_battery >= 38500 || virtual_temp >= 44500 {
-                        200000  // Hard Limit
+                        200000 // Hard Limit
                     } else if t_battery >= 37800 || virtual_temp >= 42500 {
-                        500000  // 0.5A
+                        500000 // 0.5A
                     } else if t_battery >= 36500 || virtual_temp >= 41000 {
-                        900000  // 0.9A
+                        900000 // 0.9A
                     } else if t_battery >= 35000 || virtual_temp >= 39000 {
                         1300000 // 1.3A
                     } else if t_battery >= 33500 || virtual_temp >= 37000 {
@@ -655,11 +662,11 @@ fn main() {
                     let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
 
                     let mut restrict_cur = if t_battery >= 38500 || virtual_temp >= 44500 {
-                        200000  // Hard Limit
+                        200000 // Hard Limit
                     } else if t_battery >= 37800 || virtual_temp >= 42500 {
-                        500000  // 0.5A
+                        500000 // 0.5A
                     } else if t_battery >= 36500 || virtual_temp >= 41000 {
-                        800000  // 0.8A
+                        800000 // 0.8A
                     } else if t_battery >= 35000 || virtual_temp >= 39000 {
                         1000000 // 1.0A
                     } else if t_battery >= 33500 || virtual_temp >= 37000 {
@@ -678,9 +685,9 @@ fn main() {
                 } else {
                     // Screen OFF
                     let restrict_cur = if t_battery >= 38500 || virtual_temp >= 44500 {
-                        200000  // Hard Limit
+                        200000 // Hard Limit
                     } else if t_battery >= 37800 || virtual_temp >= 42500 {
-                        500000  // 0.5A
+                        500000 // 0.5A
                     } else if t_battery >= 36500 || virtual_temp >= 41000 {
                         1000000 // 1.0A
                     } else if t_battery >= 35000 || virtual_temp >= 39000 {
@@ -764,7 +771,7 @@ fn main() {
             _ if virtual_temp >= 40000 || is_thermal_spike => Duration::from_secs(1), // Hot/Spiking - Rapid response
             _ => Duration::from_secs(3), // Normal operation
         };
-        
+
         thread::sleep(sleep_duration);
     }
 }
