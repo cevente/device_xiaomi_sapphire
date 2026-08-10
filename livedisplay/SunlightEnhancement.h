@@ -12,8 +12,8 @@ public:
     SunlightEnhancement();
     ~SunlightEnhancement() override;
 
-    // Standard AIDL methods (verify signatures match your interface definition)
-    ::ndk::ScopedAStatus isEnabled(bool* _aidl_return) override;
+    // Corrected to match ISunlightEnhancement.aidl (getEnabled instead of isEnabled)
+    ::ndk::ScopedAStatus getEnabled(bool* _aidl_return) override;
     ::ndk::ScopedAStatus setEnabled(bool enabled) override;
 
 private:
@@ -25,6 +25,7 @@ private:
     std::thread mMonitorThread;
     std::atomic<bool> mStopThread{false};
     uint32_t mStoredBrightness = 0;
+    bool mEnabled = false; // Added missing state tracker variable
 };
 
 } // namespace aidl::vendor::lineage::livedisplay
