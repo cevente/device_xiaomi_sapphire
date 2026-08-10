@@ -206,31 +206,10 @@ if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
 fi
 
 #=====================================================================
-# 9. ZRAM (Streamlined execution with fallback)
+# 9. RT PARAMETERS
 #=====================================================================
 log_message ""
-log_message "--- 9. Setting ZRAM ---"
-
-swapoff /dev/block/zram0 2>/dev/null
-echo 1 > /sys/block/zram0/reset 2>/dev/null
-
-echo zstd > /sys/block/zram0/comp_algorithm 2>/dev/null || echo lz4 > /sys/block/zram0/comp_algorithm 2>/dev/null
-
-# 4GB ZRAM size (4096MB)
-echo 4294967296 > /sys/block/zram0/disksize 2>/dev/null
-mkswap /dev/block/zram0 2>/dev/null
-swapon /dev/block/zram0 -p 32767 2>/dev/null
-
-log_message "✓ ZRAM initialized: $(cat /sys/block/zram0/disksize 2>/dev/null)"
-
-echo 0 > /proc/sys/vm/page-cluster 2>/dev/null
-echo 100 > /proc/sys/vm/swappiness 2>/dev/null
-
-#=====================================================================
-# 10. RT PARAMETERS
-#=====================================================================
-log_message ""
-log_message "--- 10. Setting RT Parameters ---"
+log_message "--- 9. Setting RT Parameters ---"
 
 long_running_rt_task_ms=1200
 sched_rt_runtime_ms=`expr $long_running_rt_task_ms + 50`
@@ -243,10 +222,10 @@ apply_setting "/proc/sys/kernel/sched_rt_runtime_us" "$sched_rt_runtime_us" "RT 
 apply_setting "/proc/sys/kernel/sched_util_clamp_min_rt_default" "0" "RT UCLAMP"
 
 #=====================================================================
-# 11. POWER MANAGEMENT
+# 10. POWER MANAGEMENT
 #=====================================================================
 log_message ""
-log_message "--- 11. Setting Power Management ---"
+log_message "--- 10. Setting Power Management ---"
 
 if [ -f /sys/power/mem_sleep ]; then
     echo s2idle > /sys/power/mem_sleep 2>/dev/null
@@ -264,10 +243,10 @@ if [ -f /sys/devices/system/cpu/qcom_lpm/parameters/sleep_disabled ]; then
 fi
 
 #=====================================================================
-# 12. CPUSET
+# 11. CPUSET
 #=====================================================================
 log_message ""
-log_message "--- 12. Setting CPUSET ---"
+log_message "--- 11. Setting CPUSET ---"
 
 apply_setting "/dev/cpuset/background/cpus" "0-2" "Background"
 apply_setting "/dev/cpuset/system-background/cpus" "0-3" "System Background"
@@ -284,10 +263,10 @@ if [ -f /dev/cpuset/camera-daemon/cpus ]; then
 fi
 
 #=====================================================================
-# 13. CPUCTL & UCLAMP
+# 12. CPUCTL & UCLAMP
 #=====================================================================
 log_message ""
-log_message "--- 13. Setting CPUCTL & UCLAMP ---"
+log_message "--- 12. Setting CPUCTL & UCLAMP ---"
 
 for group in top-app foreground foreground_window system-background background camera-daemon; do
     if [ -f "/dev/cpuctl/$group/cpu.shares" ]; then
@@ -303,10 +282,10 @@ fi
 log_message "✓ CPU shares & uclamp baseline configured"
 
 #=====================================================================
-# 14. I/O SCHEDULER
+# 13. I/O SCHEDULER
 #=====================================================================
 log_message ""
-log_message "--- 14. Setting I/O Scheduler ---"
+log_message "--- 13. Setting I/O Scheduler ---"
 
 for dev in sda sdb sdc sdd sde sdf mmcblk1; do
     if [ -f "/sys/block/$dev/queue/scheduler" ]; then
@@ -322,20 +301,20 @@ done
 log_message "✓ I/O schedulers configured"
 
 #=====================================================================
-# 15. NETWORK
+# 14. NETWORK
 #=====================================================================
 log_message ""
-log_message "--- 15. Setting Network ---"
+log_message "--- 14. Setting Network ---"
 
 apply_setting "/proc/sys/net/ipv4/tcp_congestion_control" "cubic" "TCP Congestion"
 apply_setting "/proc/sys/net/core/rmem_max" "16777216" "RMem Max"
 apply_setting "/proc/sys/net/core/wmem_max" "8388608" "WMem Max"
 
 #=====================================================================
-# 16. GPU
+# 15. GPU
 #=====================================================================
 log_message ""
-log_message "--- 16. Setting GPU ---"
+log_message "--- 15. Setting GPU ---"
 
 if [ -f /sys/class/kgsl/kgsl-3d0/idle_timer ]; then
     echo 80 > /sys/class/kgsl/kgsl-3d0/idle_timer 2>/dev/null
@@ -343,16 +322,15 @@ if [ -f /sys/class/kgsl/kgsl-3d0/idle_timer ]; then
 fi
 
 #=====================================================================
-# 17. FINAL VERIFICATION
+# 16. FINAL VERIFICATION
 #=====================================================================
 log_message ""
-log_message "--- 17. Final Verification ---"
+log_message "--- 16. Final Verification ---"
 
 swappiness=$(cat /proc/sys/vm/swappiness 2>/dev/null)
 sched_boost=$(cat /proc/sys/kernel/sched_boost 2>/dev/null)
 silver_gov=$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null)
 gold_gov=$(cat /sys/devices/system/cpu/cpufreq/policy4/scaling_governor 2>/dev/null)
-comp_alg=$(cat /sys/block/zram0/comp_algorithm 2>/dev/null)
 
 log_message "========================================="
 log_message "Verification Results:"
@@ -361,7 +339,6 @@ log_message "Silver Governor: $silver_gov (expected: walt)"
 log_message "Gold Governor: $gold_gov (expected: walt)"
 log_message "Swappiness: $swappiness (expected: 100)"
 log_message "Sched Boost: $sched_boost (expected: 0)"
-log_message "ZRAM Algorithm: $comp_alg"
 
 if [ "$swappiness" = "100" ] && [ "$silver_gov" = "walt" ]; then
     log_message "========================================="
