@@ -1860,8 +1860,8 @@ vendor/bin/thermal-engine-v2
 vendor/etc/init/init_thermal-engine-v2.rc
 
 # Thermal (Xiaomi)
-vendor/bin/mi_thermald
-vendor/etc/init/init.mi_thermald.rc
+# vendor/bin/mi_thermald
+# vendor/etc/init/init.mi_thermald.rc
 
 # Thermal configs
 vendor/etc/thermal-camera.conf
