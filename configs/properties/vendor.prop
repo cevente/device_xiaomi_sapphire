@@ -341,3 +341,18 @@ ro.vendor.sensors.xiaomi.udfps=true
 # IO Cgroups
 ro.vendor.iocgrp.config=1
 
+# Perfs 
+ro.surface_flinger.set_idle_timer_ms=200
+ro.surface_flinger.set_touch_timer_ms=1000
+ro.surface_flinger.use_content_detection_for_refresh_rate=true
+
+ro.lmk.use_psi=true
+ro.lmk.psi_complete_stall_ms=70
+ro.lmk.psi_partial_stall_ms=130
+ro.lmk.thrashing_limit=30
+ro.lmk.kill_heaviest_task=true
+
+ro.config.use_compaction=true
+ro.config.compact_action_1=full
+ro.config.compact_action_2=some
+ro.config.compact_procstate_throttle=1000,2000,3000
