@@ -12,7 +12,7 @@ use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // ── Sensor paths ────────────────────────────────────────────────────────────
 const TZ_PA: &str = "/sys/class/thermal/thermal_zone18/temp";
@@ -90,16 +90,21 @@ const BOOST_ENABLED_STR: &str = "1516800 0 0 0 1344000 0 0 0";
 const BOOST_DISABLED_STR: &str = "0 0 0 0 0 0 0 0";
 
 // ── Predictive control constants ──────────────────────────────────────────
-const THERMAL_SPIKE_THRESHOLD: i32 = 1500; // 1.5°C per 2s interval
+const THERMAL_SPIKE_THRESHOLD_NORMALIZED: i32 = 750; // 0.75°C per second (normalized)
 const PROACTIVE_CPU_TEMP_BOOST: i32 = 3000; // 3°C offset for throttling
 const PROACTIVE_BOOST_TEMP_THRESHOLD: i32 = 42000; // 42°C
 const PROACTIVE_CHG_TEMP_THRESHOLD: i32 = 35000; // 35°C
 
+// ── Sleep duration constants ──────────────────────────────────────────────
+const SCREEN_OFF_SLEEP: u64 = 8;
+const NORMAL_SLEEP: u64 = 3;
+const HOT_SLEEP: u64 = 1;
+
 // ── High-Performance I/O Wrapper ────────────────────────────────────────────
 struct SysfsNode {
     file: std::fs::File,
-    buffer: String,
     path: &'static str,
+    read_buf: String, // Reusable buffer to avoid allocations
 }
 
 impl SysfsNode {
@@ -111,8 +116,8 @@ impl SysfsNode {
         {
             Ok(file) => Some(Self {
                 file,
-                buffer: String::with_capacity(32),
                 path,
+                read_buf: String::with_capacity(32),
             }),
             Err(e) => {
                 eprintln!("Warning: Could not open {} ({})", path, e);
@@ -123,9 +128,9 @@ impl SysfsNode {
 
     fn read(&mut self) -> Option<i32> {
         self.file.seek(SeekFrom::Start(0)).ok()?;
-        self.buffer.clear();
-        self.file.read_to_string(&mut self.buffer).ok()?;
-        self.buffer.trim().parse().ok()
+        self.read_buf.clear();
+        self.file.read_to_string(&mut self.read_buf).ok()?;
+        self.read_buf.trim().parse().ok()
     }
 
     fn write(&mut self, value: i32) {
@@ -135,11 +140,17 @@ impl SysfsNode {
         }
         let _ = self.file.set_len(0);
 
-        let val_str = format!("{}\n", value);
-        if let Err(e) = self.file.write_all(val_str.as_bytes()) {
+        // Use stack buffer to avoid heap allocation
+        let mut buf = [0u8; 32];
+        let s = format!("{}\n", value);
+        let bytes = s.as_bytes();
+        let len = bytes.len().min(buf.len());
+        buf[..len].copy_from_slice(&bytes[..len]);
+        
+        if let Err(e) = self.file.write_all(&buf[..len]) {
             eprintln!("Failed to write {} to {}: {}", value, self.path, e);
         }
-        let _ = self.file.sync_all();
+        // No sync_all() - virtual filesystems don't need it
     }
 
     fn write_str(&mut self, value: &str) {
@@ -149,11 +160,10 @@ impl SysfsNode {
         }
         let _ = self.file.set_len(0);
 
-        let val_str = format!("{}\n", value);
-        if let Err(e) = self.file.write_all(val_str.as_bytes()) {
+        if let Err(e) = self.file.write_all(value.as_bytes()) {
             eprintln!("Failed to write string to {}: {}", self.path, e);
         }
-        let _ = self.file.sync_all();
+        // No sync_all()
     }
 }
 
@@ -251,6 +261,9 @@ fn main() {
     let mut state_cdsp: i32 = 0; // Max 5
     let mut state_adsp: i32 = 0; // Max 1
 
+    // Time tracking for normalized delta calculation
+    let mut last_update = Instant::now();
+
     // ── Runtime loop ──────────────────────────────────────────────────────
     loop {
         // ── Read sensors ──────────────────────────────────────────────────
@@ -277,19 +290,30 @@ fn main() {
         let virtual_c = virtual_temp / 1000;
         let batt_temp = t_battery / 1000;
 
-        // ── Calculate thermal derivative (Rate of Change) ───────────────
-        let temp_delta = match prev_virtual_temp {
-            Some(prev) => virtual_temp - prev,
-            None => 0,
+        // ── Calculate normalized thermal derivative (Rate of Change per second) ──
+        let now = Instant::now();
+        let elapsed_secs = now.duration_since(last_update).as_secs_f64();
+        last_update = now;
+
+        let (temp_delta_normalized, is_thermal_spike) = match prev_virtual_temp {
+            Some(prev) => {
+                let raw_delta = virtual_temp - prev;
+                let normalized = if elapsed_secs > 0.0 {
+                    (raw_delta as f64 / elapsed_secs) as i32
+                } else {
+                    0
+                };
+                let spike = normalized >= THERMAL_SPIKE_THRESHOLD_NORMALIZED;
+                (normalized, spike)
+            }
+            None => (0, false),
         };
         prev_virtual_temp = Some(virtual_temp);
 
-        let is_thermal_spike = temp_delta >= THERMAL_SPIKE_THRESHOLD;
-
         if is_thermal_spike {
             println!(
-                "[PROACTIVE] Rapid thermal rise detected! Delta: +{:.1}°C/2s",
-                temp_delta as f32 / 1000.0
+                "[PROACTIVE] Rapid thermal rise detected! Rate: +{:.1}°C/s",
+                temp_delta_normalized as f32 / 1000.0
             );
         }
 
@@ -742,11 +766,11 @@ fn main() {
 
         // ── Status Log ────────────────────────────────────────────────────
         println!(
-            "V:{}°C | B:{}°C | HVX:{}°C | Δ:{:+.1}°C | C0:L{} C4:L{} G:L{} CDSP:L{} ADSP:L{} DAC:{} TS:L{} BL:{} W:{} Bs:{} HP:{}{} SOC:{}% | CHG:[FM:{} QC:{}] S:{}",
+            "V:{}°C | B:{}°C | HVX:{}°C | Δ:{:+.1}°C/s | C0:L{} C4:L{} G:L{} CDSP:L{} ADSP:L{} DAC:{} TS:L{} BL:{} W:{} Bs:{} HP:{}{} SOC:{}% | CHG:[FM:{} QC:{}] S:{}",
             virtual_c,
             batt_temp,
             t_hvx / 1000,
-            temp_delta as f32 / 1000.0,
+            temp_delta_normalized as f32 / 1000.0,
             state_cpu0,
             state_cpu4,
             state_gpu,
@@ -767,9 +791,9 @@ fn main() {
 
         // ── Dynamic Sleep Duration ──────────────────────────────────────
         let sleep_duration = match screen_state {
-            0 => Duration::from_secs(8), // Screen Off - Save battery
-            _ if virtual_temp >= 40000 || is_thermal_spike => Duration::from_secs(1), // Hot/Spiking - Rapid response
-            _ => Duration::from_secs(3), // Normal operation
+            0 => Duration::from_secs(SCREEN_OFF_SLEEP),
+            _ if virtual_temp >= 40000 || is_thermal_spike => Duration::from_secs(HOT_SLEEP),
+            _ => Duration::from_secs(NORMAL_SLEEP),
         };
 
         thread::sleep(sleep_duration);
