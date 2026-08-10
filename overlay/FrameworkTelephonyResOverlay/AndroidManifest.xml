@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest
+    android:compileSdkVersion="36"
+    android:compileSdkVersionCodename="16"
+    coreApp="true"
+    package="android.aosp.overlay.telephony"
+    platformBuildVersionCode="36"
+    platformBuildVersionName="16"
+    xmlns:android="http://schemas.android.com/apk/res/android">
+    <overlay
+        android:priority="2000"
+        android:targetPackage="android"
+        android:isStatic="true" />
+    <application
+        android:hasCode="false"
+        android:extractNativeLibs="false" />
+</manifest>
