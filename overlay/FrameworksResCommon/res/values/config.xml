@@ -284,7 +284,7 @@
     -->
     <integer-array name="config_textureTickVibePattern">
         <item>0</item>
-        <item>35</item>
+        <item>80</item>
     </integer-array>
      
     <!-- Vibrator pattern for feedback about touching a virtual key -->
@@ -296,13 +296,13 @@
     <!-- Vibrator pattern for feedback when selecting an hour/minute tick of a Clock -->
     <integer-array name="config_clockTickVibePattern">
         <item>0</item>
-        <item>50</item>
+        <item>80</item>
     </integer-array>
 
     <!-- Vibrator pattern for feedback when selecting a day/month/year date of a Calendar -->
     <integer-array name="config_calendarDateVibePattern">
         <item>0</item>
-        <item>50</item>
+        <item>80</item>
     </integer-array>
 
     <!-- Vibrator pattern for feedback about booting with safe mode enabled -->
@@ -329,7 +329,7 @@
 
     <!-- Vibrator pattern for keyboard tap -->
     <integer-array name="config_keyboardTapVibePattern">
-        <item>50</item>
+        <item>80</item>
     </integer-array>
 
     <!-- The default intensity level for haptic feedback. See
