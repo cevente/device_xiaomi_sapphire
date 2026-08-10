@@ -137,12 +137,6 @@
       "ResetOnInit": true
     },
     {
-      "Name": "SchedAsymcapBoost",
-      "Path": "/proc/sys/walt/sched_asymcap_boost",
-      "Values": ["0", "1", "2"],
-      "ResetOnInit": true
-    },
-    {
       "Name": "SchedColocBusyHystCPU",
       "Path": "/proc/sys/walt/sched_coloc_busy_hyst_cpu_busy_pct",
       "Values": ["0", "20", "40"],
@@ -431,7 +425,7 @@
       "PowerHint": "INTERACTION",
       "Node": "SchedBoostOnInput",
       "Duration": 0,
-      "Value": "0"
+      "Value": "1"
     },
     {
       "PowerHint": "INTERACTION",
@@ -647,7 +641,7 @@
       "PowerHint": "LAUNCH",
       "Node": "SchedBoostOnInput",
       "Duration": 0,
-      "Value": "0"
+      "Value": "1"
     },
     {
       "PowerHint": "LAUNCH",
@@ -737,7 +731,7 @@
       "PowerHint": "EXPENSIVE_RENDERING",
       "Node": "SchedBoostOnInput",
       "Duration": 0,
-      "Value": "0"
+      "Value": "1"
     }
   ]
 }
