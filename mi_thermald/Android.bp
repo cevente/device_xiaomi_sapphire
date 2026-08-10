@@ -1,0 +1,12 @@
+rust_binary {
+    name: "mi_thermald",
+    srcs: ["src/main.rs"],
+    edition: "2021",
+    vendor: true,
+    init_rc: ["init.mi_thermald.rc"],
+    
+    // Disable lto if compile time is high during ROM build iteration
+    flags: [
+        "-C", "opt-level=3",
+    ],
+}
