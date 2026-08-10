@@ -1,30 +1,30 @@
-/*
- * SPDX-FileCopyrightText: 2019-2025 The LineageOS Project
- * SPDX-License-Identifier: Apache-2.0
- */
-
 #pragma once
 
-#include <string>
 #include <aidl/vendor/lineage/livedisplay/BnSunlightEnhancement.h>
+#include <thread>
+#include <atomic>
+#include <cstdint>
 
-namespace aidl {
-namespace vendor {
-namespace lineage {
-namespace livedisplay {
+namespace aidl::vendor::lineage::livedisplay {
 
 class SunlightEnhancement : public BnSunlightEnhancement {
-  public:
-    // Methods from ::aidl::vendor::lineage::livedisplay::BnSunlightEnhancement follow.
-    ndk::ScopedAStatus getEnabled(bool* _aidl_return) override;
-    ndk::ScopedAStatus setEnabled(bool enabled) override;
+public:
+    SunlightEnhancement();
+    ~SunlightEnhancement() override;
 
-  private:
-    bool mEnabled = false;
-    std::string mStoredBrightness;
+    // Standard AIDL methods (verify signatures match your interface definition)
+    ::ndk::ScopedAStatus isEnabled(bool* _aidl_return) override;
+    ::ndk::ScopedAStatus setEnabled(bool enabled) override;
+
+private:
+    void monitorScreenState();
+    uint32_t getBrightness();
+    void setBrightness(uint32_t level);
+    void applyHbm(bool enabled);
+
+    std::thread mMonitorThread;
+    std::atomic<bool> mStopThread{false};
+    uint32_t mStoredBrightness = 0;
 };
 
-}  // namespace livedisplay
-}  // namespace lineage
-}  // namespace vendor
-}  // namespace aidl
+} // namespace aidl::vendor::lineage::livedisplay
