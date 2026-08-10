@@ -256,6 +256,7 @@ fn main() {
     let mut restricted: bool = false;
     let mut prev_screen_state: i32 = 0;
     let mut charge_paused_at_full: bool = false;
+    let mut full_charge_start_time: Option<Instant> = None;
 
     // DSP state tracking
     let mut state_cdsp: i32 = 0; // Max 5
@@ -529,13 +530,29 @@ fn main() {
 
         // ── Smart Idle Charge Control (100% Override) ─────────────────────
         if soc >= 100 && screen_state == 0 && !charge_paused_at_full {
-            println!("[SMART CHARGE] Battery 100% & Screen Off. Suspending input current.");
-            write_opt!(node_input_suspend, 1);
-            charge_paused_at_full = true;
-        } else if charge_paused_at_full && screen_state == 1 {
-            println!("[SMART CHARGE] Screen turned on. Restoring charge input.");
-            write_opt!(node_input_suspend, 0);
-            charge_paused_at_full = false;
+            if let Some(start_time) = full_charge_start_time {
+                if start_time.elapsed().as_secs() >= 600 { // 600 seconds = 10 minutes
+                    println!("[SMART CHARGE] 10 minutes elapsed at 100%. Suspending input current.");
+                    write_opt!(node_input_suspend, 1);
+                    charge_paused_at_full = true;
+                    full_charge_start_time = None; // Reset timer
+                }
+            } else {
+                println!("[SMART CHARGE] Battery 100% & Screen Off. Waiting 10 minutes to suspend.");
+                full_charge_start_time = Some(Instant::now());
+            }
+        } else {
+            // Reset the timer if the screen turns on or battery drops before 10 mins is up
+            if full_charge_start_time.is_some() {
+                println!("[SMART CHARGE] Charge timer interrupted. Resetting.");
+                full_charge_start_time = None;
+            }
+
+            if charge_paused_at_full && screen_state == 1 {
+                println!("[SMART CHARGE] Screen turned on. Restoring charge input.");
+                write_opt!(node_input_suspend, 0);
+                charge_paused_at_full = false;
+            }
         }
 
         // ── Charging Control Protocol Switching ─────────────────────────
