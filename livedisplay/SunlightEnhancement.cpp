@@ -152,6 +152,27 @@ void SunlightEnhancement::monitorScreenState() {
             lastState = currentState;
         }
 
+        // Track live brightness changes while HBM is active
+        if (mEnabled) {
+            uint32_t currentBrightness = getBrightness();
+            if (currentBrightness > 0) {
+                if (!mHbmActive) {
+                    // Sample HBM baseline level set by OS framework on trigger
+                    mLastBrightness = currentBrightness;
+                    mHbmActive = true;
+                } else {
+                    // Update user adjustment if slider moved during HBM
+                    uint32_t last = mLastBrightness.load();
+                    if (currentBrightness != last) {
+                        mUserSetBrightness = currentBrightness;
+                        mLastBrightness = currentBrightness;
+                    }
+                }
+            }
+        } else {
+            mHbmActive = false;
+        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 }
@@ -162,26 +183,36 @@ ndk::ScopedAStatus SunlightEnhancement::setEnabled(bool enabled) {
     }
 
     if (enabled) {
-        // Cache pre-HBM brightness state cleanly in memory via IOCTL
         mStoredBrightness = getBrightness();
+        mUserSetBrightness = 0;
+        mHbmActive = false;
     }
+
+    mEnabled = enabled;
 
     // Apply Stepped HBM and global features via IOCTL
     applyHbm(enabled);
 
     if (!enabled && mStoredBrightness > 0) {
+        // Final poll in case slider was adjusted immediately prior to disable call
         uint32_t currentBrightness = getBrightness();
+        uint32_t last = mLastBrightness.load();
+        if (mHbmActive && currentBrightness > 0 && currentBrightness != last) {
+            mUserSetBrightness = currentBrightness;
+        }
 
-        // Restore user brightness if modified during HBM; otherwise restore initial level
-        uint32_t targetBrightness = (currentBrightness != 0 && currentBrightness != mStoredBrightness)
-                                         ? currentBrightness
-                                         : mStoredBrightness;
+        uint32_t userSet = mUserSetBrightness.load();
+        uint32_t stored = mStoredBrightness.load();
+        uint32_t targetBrightness = (userSet > 0) ? userSet : stored;
 
         setBrightness(targetBrightness);
+
+        // Reset tracked states
         mStoredBrightness = 0;
+        mUserSetBrightness = 0;
+        mHbmActive = false;
     }
 
-    mEnabled = enabled;
     return ndk::ScopedAStatus::ok();
 }
 
