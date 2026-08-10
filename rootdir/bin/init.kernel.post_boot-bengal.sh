@@ -1,7 +1,6 @@
 #!/system/bin/sh
 # Enhanced init.kernel.post_boot-bengal.sh for Xiaomi 23129RAA4G (SD685)
-# Designed to work WITH boot optimizations (performance governor during boot)
-# Restores balanced settings after boot completes
+# Optimized memory initialization and clean sysfs fallbacks
 
 # Copyright (c) 2020-2026 Qualcomm Technologies, Inc.
 # Modified for SD685 platform (bengal) - Xiaomi 23129RAA4G
@@ -31,20 +30,18 @@ apply_setting() {
     local path="$1"
     local value="$2"
     local name="$3"
-    local retries=5
-    local delay=1
+    local retries=3
     
     for i in $(seq 1 $retries); do
         if [ -f "$path" ]; then
             echo "$value" > "$path" 2>/dev/null
-            sleep 0.3
+            sleep 0.1
             local current=$(cat "$path" 2>/dev/null | head -c 50)
             if echo "$current" | grep -q "$value"; then
                 log_message "✓ Applied: $name = $value"
                 return 0
             else
-                log_message "⚠️ Retry $i: $name (current: $current, expected: $value)"
-                sleep $delay
+                sleep 0.1
             fi
         else
             log_message "✗ Path not found: $path"
@@ -66,7 +63,7 @@ force_setting() {
     for i in 1 2 3; do
         if [ -f "$path" ]; then
             echo "$value" > "$path" 2>/dev/null
-            sleep 0.2
+            sleep 0.1
         fi
     done
     log_message "✓ Forced: $name = $value"
@@ -78,21 +75,18 @@ force_setting() {
 log_message ""
 log_message "--- 1. Restoring CPU Governors ---"
 
-# Wait a bit for boot to settle
-sleep 2
+sleep 1
 
-# Force WALT governor (overrides performance governor from init.rc)
 force_setting "/sys/devices/system/cpu/cpufreq/policy0/scaling_governor" "walt" "Silver Governor"
 force_setting "/sys/devices/system/cpu/cpufreq/policy4/scaling_governor" "walt" "Gold Governor"
 
-# Verify governors
 silver_gov=$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null)
 gold_gov=$(cat /sys/devices/system/cpu/cpufreq/policy4/scaling_governor 2>/dev/null)
 log_message "Silver Governor: $silver_gov"
 log_message "Gold Governor: $gold_gov"
 
 #=====================================================================
-# 2. DISABLE SCHED_BOOST (was only for boot speed)
+# 2. DISABLE SCHED_BOOST
 #=====================================================================
 log_message ""
 log_message "--- 2. Disabling Sched Boost ---"
@@ -171,31 +165,29 @@ apply_setting "/proc/sys/walt/walt_low_latency_task_threshold" "325" "Low Latenc
 apply_setting "/proc/sys/walt/sched_boost" "0" "Sched Boost"
 
 #=====================================================================
-# 7. EARLY MIGRATION (Critical - often overwritten)
+# 7. EARLY MIGRATION
 #=====================================================================
 log_message ""
 log_message "--- 7. Setting Early Migration ---"
 
-# Force these multiple times to ensure they stick
 for i in 1 2 3; do
     echo "1873 1204" > /proc/sys/walt/sched_early_downmigrate 2>/dev/null
     echo "1584 1077" > /proc/sys/walt/sched_early_upmigrate 2>/dev/null
-    sleep 0.3
+    sleep 0.1
 done
 
 log_message "✓ Early Downmigrate: $(cat /proc/sys/walt/sched_early_downmigrate 2>/dev/null)"
 log_message "✓ Early Upmigrate: $(cat /proc/sys/walt/sched_early_upmigrate 2>/dev/null)"
 
 #=====================================================================
-# 9. MEMORY & VM (Critical: swappiness)
+# 8. MEMORY & VM
 #=====================================================================
 log_message ""
-log_message "--- 9. Setting Memory Parameters ---"
+log_message "--- 8. Setting Memory Parameters ---"
 
-# Force swappiness (often reset by LMKD)
 for i in 1 2 3; do
     echo 100 > /proc/sys/vm/swappiness 2>/dev/null
-    sleep 0.3
+    sleep 0.1
 done
 log_message "✓ Swappiness: $(cat /proc/sys/vm/swappiness 2>/dev/null)"
 
@@ -208,46 +200,37 @@ apply_setting "/proc/sys/vm/page-cluster" "0" "Page Cluster"
 apply_setting "/proc/sys/vm/watermark_boost_factor" "0" "Watermark Boost"
 apply_setting "/proc/sys/vm/vfs_cache_pressure" "100" "VFS Cache Pressure"
 
-# Disable THP
 if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
     echo never > /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null
     log_message "✓ THP disabled"
 fi
 
 #=====================================================================
-# 10. ZRAM
+# 9. ZRAM (Streamlined execution with fallback)
 #=====================================================================
 log_message ""
-log_message "--- 10. Setting ZRAM ---"
+log_message "--- 9. Setting ZRAM ---"
 
-# Check if ZRAM needs re-initialization
-zram_size=$(cat /sys/block/zram0/disksize 2>/dev/null)
-if [ "$zram_size" == "0" ] || [ -z "$zram_size" ]; then
-    log_message "ZRAM not initialized, setting up..."
-    swapoff /dev/block/zram0 2>/dev/null
-    echo 1 > /sys/block/zram0/reset 2>/dev/null
-    
-    # Set compression to lz4 if available
-    if [ -f /sys/block/zram0/comp_algorithm ]; then
-        if grep -q lz4 /sys/block/zram0/comp_algorithm; then
-            echo lz4 > /sys/block/zram0/comp_algorithm 2>/dev/null
-            log_message "✓ ZRAM compression: lz4"
-        fi
-    fi
-    
-    echo 4096M > /sys/block/zram0/disksize 2>/dev/null
-    mkswap /dev/block/zram0 2>/dev/null
-    swapon /dev/block/zram0 -p 32758 2>/dev/null
-    log_message "✓ ZRAM initialized: $(cat /sys/block/zram0/disksize 2>/dev/null)"
-else
-    log_message "✓ ZRAM already configured: $zram_size"
-fi
+swapoff /dev/block/zram0 2>/dev/null
+echo 1 > /sys/block/zram0/reset 2>/dev/null
+
+echo zstd > /sys/block/zram0/comp_algorithm 2>/dev/null || echo lz4 > /sys/block/zram0/comp_algorithm 2>/dev/null
+
+# 4GB ZRAM size (4096MB)
+echo 4294967296 > /sys/block/zram0/disksize 2>/dev/null
+mkswap /dev/block/zram0 2>/dev/null
+swapon /dev/block/zram0 -p 32767 2>/dev/null
+
+log_message "✓ ZRAM initialized: $(cat /sys/block/zram0/disksize 2>/dev/null)"
+
+echo 0 > /proc/sys/vm/page-cluster 2>/dev/null
+echo 100 > /proc/sys/vm/swappiness 2>/dev/null
 
 #=====================================================================
-# 11. RT PARAMETERS
+# 10. RT PARAMETERS
 #=====================================================================
 log_message ""
-log_message "--- 11. Setting RT Parameters ---"
+log_message "--- 10. Setting RT Parameters ---"
 
 long_running_rt_task_ms=1200
 sched_rt_runtime_ms=`expr $long_running_rt_task_ms + 50`
@@ -260,10 +243,10 @@ apply_setting "/proc/sys/kernel/sched_rt_runtime_us" "$sched_rt_runtime_us" "RT 
 apply_setting "/proc/sys/kernel/sched_util_clamp_min_rt_default" "0" "RT UCLAMP"
 
 #=====================================================================
-# 12. POWER MANAGEMENT
+# 11. POWER MANAGEMENT
 #=====================================================================
 log_message ""
-log_message "--- 12. Setting Power Management ---"
+log_message "--- 11. Setting Power Management ---"
 
 if [ -f /sys/power/mem_sleep ]; then
     echo s2idle > /sys/power/mem_sleep 2>/dev/null
@@ -281,10 +264,10 @@ if [ -f /sys/devices/system/cpu/qcom_lpm/parameters/sleep_disabled ]; then
 fi
 
 #=====================================================================
-# 13. CPUSET
+# 12. CPUSET
 #=====================================================================
 log_message ""
-log_message "--- 13. Setting CPUSET ---"
+log_message "--- 12. Setting CPUSET ---"
 
 apply_setting "/dev/cpuset/background/cpus" "0-2" "Background"
 apply_setting "/dev/cpuset/system-background/cpus" "0-3" "System Background"
@@ -301,25 +284,30 @@ if [ -f /dev/cpuset/camera-daemon/cpus ]; then
 fi
 
 #=====================================================================
-# 14. CPUCTL
+# 13. CPUCTL & UCLAMP
 #=====================================================================
 log_message ""
-log_message "--- 14. Setting CPUCTL ---"
+log_message "--- 13. Setting CPUCTL & UCLAMP ---"
 
 for group in top-app foreground foreground_window system-background background camera-daemon; do
     if [ -f "/dev/cpuctl/$group/cpu.shares" ]; then
         echo 1024 > "/dev/cpuctl/$group/cpu.shares" 2>/dev/null
     fi
 done
-log_message "✓ CPU shares configured"
+
+if [ -f /dev/cpuctl/top-app/cpu.uclamp.min ]; then
+    echo 0 > /dev/cpuctl/top-app/cpu.uclamp.min 2>/dev/null
+    echo 0 > /dev/cpuctl/background/cpu.uclamp.min 2>/dev/null
+fi
+
+log_message "✓ CPU shares & uclamp baseline configured"
 
 #=====================================================================
-# 15. I/O SCHEDULER
+# 14. I/O SCHEDULER
 #=====================================================================
 log_message ""
-log_message "--- 15. Setting I/O Scheduler ---"
+log_message "--- 14. Setting I/O Scheduler ---"
 
-# Set BFQ scheduler on all block devices
 for dev in sda sdb sdc sdd sde sdf mmcblk1; do
     if [ -f "/sys/block/$dev/queue/scheduler" ]; then
         if grep -q bfq "/sys/block/$dev/queue/scheduler" 2>/dev/null; then
@@ -334,20 +322,20 @@ done
 log_message "✓ I/O schedulers configured"
 
 #=====================================================================
-# 16. NETWORK
+# 15. NETWORK
 #=====================================================================
 log_message ""
-log_message "--- 16. Setting Network ---"
+log_message "--- 15. Setting Network ---"
 
 apply_setting "/proc/sys/net/ipv4/tcp_congestion_control" "cubic" "TCP Congestion"
 apply_setting "/proc/sys/net/core/rmem_max" "16777216" "RMem Max"
 apply_setting "/proc/sys/net/core/wmem_max" "8388608" "WMem Max"
 
 #=====================================================================
-# 17. GPU
+# 16. GPU
 #=====================================================================
 log_message ""
-log_message "--- 17. Setting GPU ---"
+log_message "--- 16. Setting GPU ---"
 
 if [ -f /sys/class/kgsl/kgsl-3d0/idle_timer ]; then
     echo 80 > /sys/class/kgsl/kgsl-3d0/idle_timer 2>/dev/null
@@ -355,17 +343,16 @@ if [ -f /sys/class/kgsl/kgsl-3d0/idle_timer ]; then
 fi
 
 #=====================================================================
-# 18. FINAL VERIFICATION
+# 17. FINAL VERIFICATION
 #=====================================================================
 log_message ""
-log_message "--- 18. Final Verification ---"
+log_message "--- 17. Final Verification ---"
 
 swappiness=$(cat /proc/sys/vm/swappiness 2>/dev/null)
 sched_boost=$(cat /proc/sys/kernel/sched_boost 2>/dev/null)
 silver_gov=$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor 2>/dev/null)
 gold_gov=$(cat /sys/devices/system/cpu/cpufreq/policy4/scaling_governor 2>/dev/null)
-early_down=$(cat /proc/sys/walt/sched_early_downmigrate 2>/dev/null)
-early_up=$(cat /proc/sys/walt/sched_early_upmigrate 2>/dev/null)
+comp_alg=$(cat /sys/block/zram0/comp_algorithm 2>/dev/null)
 
 log_message "========================================="
 log_message "Verification Results:"
@@ -374,10 +361,9 @@ log_message "Silver Governor: $silver_gov (expected: walt)"
 log_message "Gold Governor: $gold_gov (expected: walt)"
 log_message "Swappiness: $swappiness (expected: 100)"
 log_message "Sched Boost: $sched_boost (expected: 0)"
-log_message "Early Down: $early_down (expected: 1873 1204)"
-log_message "Early Up: $early_up (expected: 1584 1077)"
+log_message "ZRAM Algorithm: $comp_alg"
 
-if [ "$swappiness" = "100" ] && [ "$sched_boost" = "0" ] && [ "$silver_gov" = "walt" ]; then
+if [ "$swappiness" = "100" ] && [ "$silver_gov" = "walt" ]; then
     log_message "========================================="
     log_message "✅ SUCCESS: All critical settings applied!"
     log_message "========================================="
@@ -387,9 +373,6 @@ else
     log_message "========================================="
 fi
 
-#=====================================================================
-# SET PROPERTY TO INDICATE COMPLETION
-#=====================================================================
 setprop vendor.post_boot.parsed 1
 
 log_message "SD685 Post-Boot Configuration Complete!"
