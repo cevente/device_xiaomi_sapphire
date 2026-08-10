@@ -671,6 +671,10 @@ PRODUCT_PACKAGES += \
     firmware_wlan_mac.bin_symlink \
     firmware_WCNSS_qcom_cfg.ini_symlink \
     firmware_wlanmdsp.mbn_symlink
-    
+
+# Thermal & Charging Rust Daemon
+PRODUCT_PACKAGES += \
+    mi_thermald
+
 # XiaomiParts
 # $(call inherit-product, device/xiaomi/sapphire/parts/parts.mk)
