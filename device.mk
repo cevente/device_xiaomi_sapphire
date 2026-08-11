@@ -680,3 +680,14 @@ PRODUCT_PACKAGES += \
 
 # XiaomiParts
 # $(call inherit-product, device/xiaomi/sapphire/parts/parts.mk)
+
+# Explicit 4KB Memory Page Size Target
+PRODUCT_MAX_PAGE_SIZE_SUPPORTED := 4096
+
+# Dex2oat CPU Allocation
+PRODUCT_PROPERTY_OVERRIDES += \
+    dalvik.vm.dex2oat-threads=4 \
+    dalvik.vm.dex2oat-cpu-set=0,1,2,3,4,5,6,7 \
+    dalvik.vm.boot-dex2oat-threads=6 \
+    dalvik.vm.boot-dex2oat-cpu-set=0,1,2,3,4,5,6,7
+
