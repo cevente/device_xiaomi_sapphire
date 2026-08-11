@@ -67,14 +67,16 @@ const WEIGHT_SUM: i32 = 1000;
 const COMPENSATION: i32 = 0;
 
 // ── Thermal stepwise/monitor configurations ────────────────────────────────
-const CPU0_TRIG: [i32; 4] = [39000, 41000, 45000, 46000];
-const CPU0_CLR: [i32; 4] = [37000, 39000, 44000, 45000];
+// OPTIMIZED: Start managing little cores at 36°C instead of waiting for 39°C
+const CPU0_TRIG: [i32; 4] = [36000, 39000, 43000, 45000];
+const CPU0_CLR: [i32; 4] = [34000, 37000, 41000, 43000];
 const CPU0_TARGET: [i32; 4] = [1804800, 1516800, 1190400, 691200];
 const CPU0_DEFAULT: i32 = 1900800;
 
-const CPU4_TRIG: [i32; 6] = [33000, 35000, 38000, 42000, 44500, 45500];
-const CPU4_CLR: [i32; 6] = [31000, 33000, 36000, 40000, 43000, 44500];
-const CPU4_TARGET: [i32; 6] = [2592000, 2400000, 2208000, 1766400, 1344000, 806400];
+// OPTIMIZED: Clamp big cores earlier. 2.4GHz at 34°C, 2.2GHz at 36°C.
+const CPU4_TRIG: [i32; 6] = [34000, 36000, 38000, 41000, 43500, 45500];
+const CPU4_CLR: [i32; 6] = [32000, 34000, 36000, 39000, 41500, 44500];
+const CPU4_TARGET: [i32; 6] = [2400000, 2208000, 1900800, 1516800, 1113600, 806400];
 const CPU4_DEFAULT: i32 = 2803200;
 
 const GPU_TRIG: [i32; 3] = [43000, 45000, 46000];
@@ -87,13 +89,15 @@ const TSTATE_CLR: [i32; 4] = [44000, 46000, 50000, 51000];
 const TSTATE_TARGET: [i32; 4] = [110100000, 110100004, 112300001, 112520001];
 
 // ── WALT String Configurations ──────────────────────────────────────────────
-const BOOST_ENABLED_STR: &str = "1516800 0 0 0 1344000 0 0 0";
+// OPTIMIZED: Lowered from 1.51GHz/1.34GHz to more efficient UI thresholds
+const BOOST_ENABLED_STR: &str = "1190400 0 0 0 1113600 0 0 0";
 const BOOST_DISABLED_STR: &str = "0 0 0 0 0 0 0 0";
 
 // ── Predictive control constants ──────────────────────────────────────────
 const THERMAL_SPIKE_THRESHOLD_NORMALIZED: i32 = 750; // 0.75°C per second (normalized)
 const PROACTIVE_CPU_TEMP_BOOST: i32 = 3000; // 3°C offset for throttling
-const PROACTIVE_BOOST_TEMP_THRESHOLD: i32 = 42000; // 42°C
+// OPTIMIZED: Disable WALT boost much earlier (37°C instead of 42°C) to prevent hitting 38°C
+const PROACTIVE_BOOST_TEMP_THRESHOLD: i32 = 37000;
 const PROACTIVE_CHG_TEMP_THRESHOLD: i32 = 36500; // 36.5°C trigger for proactive charge restriction
 
 // ── Sleep duration constants ──────────────────────────────────────────────
@@ -233,8 +237,8 @@ fn main() {
     write_opt!(node_res_cur, 1500000);
     write_opt!(node_input_suspend, 0);
 
-    // Initial WALT state
-    write_str_opt!(node_walt_ms, "80");
+    // OPTIMIZED: Initial WALT state - reduced boost duration from 80ms to 40ms
+    write_str_opt!(node_walt_ms, "40");
     write_str_opt!(node_walt_boost, BOOST_ENABLED_STR);
 
     // State tracking
@@ -490,14 +494,15 @@ fn main() {
         }
 
         // ── WALT Input Boost ──────────────────────────────────────────────
-        let should_disable_boost = (virtual_temp >= 48000)
-            || (virtual_temp >= PROACTIVE_BOOST_TEMP_THRESHOLD && is_thermal_spike);
-
+        // OPTIMIZED: Disable boost at 37°C or during rapid thermal spike
+        let should_disable_boost = (virtual_temp >= PROACTIVE_BOOST_TEMP_THRESHOLD) || 
+                                   (virtual_temp >= 35000 && is_thermal_spike);
+        
         if should_disable_boost && state_boost == 1 {
             state_boost = 0;
-            println!("[BOOST] Proactive Disable (Rapid heat rise)");
+            println!("[BOOST] Proactive Disable (Thermal cap reached)");
             write_str_opt!(node_walt_boost, BOOST_DISABLED_STR);
-        } else if !should_disable_boost && virtual_temp <= 46000 && state_boost == 0 {
+        } else if !should_disable_boost && virtual_temp <= (PROACTIVE_BOOST_TEMP_THRESHOLD - 2000) && state_boost == 0 {
             state_boost = 1;
             println!("[BOOST] Re-enabled WALT Input Boost");
             write_str_opt!(node_walt_boost, BOOST_ENABLED_STR);
@@ -527,6 +532,7 @@ fn main() {
         write_opt!(node_cpu6_on, core_val);
 
         // ── Smart Idle Charge Control ─────────────────────────────────────
+        // UNCHANGED: All charging logic kept exactly as original
         if soc >= 100 && screen_state == 0 && !charge_paused_at_full {
             if let Some(start_time) = full_charge_start_time {
                 if start_time.elapsed().as_secs() >= 600 {
@@ -553,8 +559,7 @@ fn main() {
         }
 
         // ── Charging Control Protocol Switching ─────────────────────────
-        // Screen OFF: Maximized intake, strictly constrained by 40.0°C.
-        // Screen ON: Strictly clamped to lower currents (0.2A - 1.5A) to avoid screen heat build-up.
+        // UNCHANGED: All charging logic kept exactly as original
         if !charge_paused_at_full {
             let is_xiaomi_charger = fastcharge_mode == 1 && quick_charge_type == 3;
             let is_qc2_charger = fastcharge_mode == 0 && quick_charge_type == 2;
