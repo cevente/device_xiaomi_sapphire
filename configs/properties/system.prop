@@ -1,6 +1,3 @@
-# Lunaris Maintainer
-ro.lunaris.maintainer=@Angelpro09_Devv
-
 # Audio
 persist.audio.button_jack.profile=volume
 persist.audio.button_jack.switch=0
