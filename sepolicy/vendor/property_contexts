@@ -33,3 +33,11 @@ ro.apk_verity.mode                  u:object_r:vendor_default_prop:s0
 persist.mm.enable.prefetch          u:object_r:vendor_default_prop:s0
 ro.mediaserver.64b.enable           u:object_r:vendor_default_prop:s0
 
+# Re-label config_prop denials to vendor_default_prop
+ro.config.use_compaction              u:object_r:vendor_default_prop:s0
+ro.config.compact_action_1            u:object_r:vendor_default_prop:s0
+ro.config.compact_action_2            u:object_r:vendor_default_prop:s0
+ro.config.compact_procstate_throttle  u:object_r:vendor_default_prop:s0
+
+# Re-label radio_prop denial to vendor_default_prop
+ro.ril.oem.btmac                      u:object_r:vendor_default_prop:s0
