@@ -303,3 +303,8 @@ SOONG_CONFIG_XIAOMI_SM6225 := \
     livedisplay_support_sunlight_enhancement
 SOONG_CONFIG_XIAOMI_SM6225_livedisplay_support_anti_flicker ?= true
 SOONG_CONFIG_XIAOMI_SM6225_livedisplay_support_sunlight_enhancement ?= true
+
+# DEXPREOPT Optimization
+WITH_DEXPREOPT := true
+WITH_DEXPREOPT_BOOT_IMG_AND_SYSTEM_SERVER_ONLY := false
+DONT_DEXPREOPT_PREBUILTS := true
