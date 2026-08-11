@@ -5,3 +5,8 @@ allow rild vendor_data_file:file create_file_perms;
 
 # In rild.te
 get_prop(rild, vendor_btmac_prop)
+# Raw rule
+allow rild default_prop:file read;
+
+# Recommended Android Macro format
+get_prop(rild, default_prop)
