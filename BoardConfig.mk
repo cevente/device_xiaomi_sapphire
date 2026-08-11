@@ -318,3 +318,5 @@ TARGET_USES_DRM_PP := true
 ENABLE_VIRTUAL_AB := true
 BOARD_VIRTUAL_AB_ENABLE := true
 PRODUCT_VIRTUAL_AB_COMPRESSION_METHOD := lz4
+# Virtual A/B Compression Features
+$(call inherit-product, $(SRC_TARGET_DIR)/product/virtual_ab_ota/vabc_features.mk)
