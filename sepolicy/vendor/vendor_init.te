@@ -31,3 +31,16 @@ allow vendor_qti_init_shell configfs:{
 # In vendor_init.te
 set_prop(vendor_init, vendor_prefetch_prop)
 set_prop(vendor_init, vendor_btmac_prop)
+
+# Raw rules
+allow vendor_init tombstone_data_file:dir search;
+allow vendor_init default_prop:property_service set;
+allow vendor_init config_prop:property_service set;
+allow vendor_init radio_prop:property_service set;
+
+# Recommended Android Macro format (use these instead of property_service set)
+allow vendor_init tombstone_data_file:dir search;
+set_prop(vendor_init, default_prop)
+set_prop(vendor_init, config_prop)
+set_prop(vendor_init, radio_prop)
+
