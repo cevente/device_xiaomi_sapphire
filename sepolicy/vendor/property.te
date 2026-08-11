@@ -15,3 +15,6 @@ vendor_public_prop(vendor_wifimac_prop)
 
 type vendor_radio_prop, property_type, vendor_property_type;
 type vendor_prefetch_prop, property_type, vendor_property_type;
+
+type vendor_default_prop, property_type, vendor_property_type;
+type vendor_config_prop, property_type, vendor_property_type;
