@@ -26,4 +26,3 @@ ro.vendor.camera.res.fmq.size  u:object_r:vendor_camera_res_prop:s0
 ro.vendor.nfc.port                              u:object_r:vendor_nfc_prop:s0
 
 persist.vendor.ro.ril.oem.btmac      u:object_r:vendor_btmac_prop:s0
-persist.vendor.mm.enable.prefetch    u:object_r:vendor_prefetch_prop:s0
