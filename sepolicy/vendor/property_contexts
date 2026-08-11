@@ -2,17 +2,17 @@
 ro.vendor.smart_dfps.enable              u:object_r:vendor_displayfeature_prop:s0
 
 # Fingerprint
-persist.vendor.fingerprint.              u:object_r:vendor_fp_prop:s0
-persist.vendor.fpc.                      u:object_r:vendor_fp_prop:s0
-persist.vendor.goodix.                   u:object_r:vendor_fp_prop:s0
-persist.vendor.sys.fp.                   u:object_r:vendor_fp_prop:s0
+persist.vendor.fingerprint              u:object_r:vendor_fp_prop:s0
+persist.vendor.fpc                      u:object_r:vendor_fp_prop:s0
+persist.vendor.goodix                   u:object_r:vendor_fp_prop:s0
+persist.vendor.sys.fp                   u:object_r:vendor_fp_prop:s0
 persist.vendor.sys.fp.info               u:object_r:vendor_fp_info_prop:s0
 persist.vendor.sys.fp.uid                u:object_r:vendor_fp_info_prop:s0
-ro.hardware.fp.                          u:object_r:vendor_fp_prop:s0
-vendor.fps_hal.                          u:object_r:vendor_fp_prop:s0
+ro.hardware.fp                          u:object_r:vendor_fp_prop:s0
+vendor.fps_hal                          u:object_r:vendor_fp_prop:s0
 vendor.fps_hal_lc                        u:object_r:vendor_fp_prop:s0
-vendor.panel.display.                    u:object_r:vendor_fp_prop:s0
-vendor.sys.fp.                           u:object_r:vendor_fp_prop:s0
+vendor.panel.display                    u:object_r:vendor_fp_prop:s0
+vendor.sys.fp     u:object_r:vendor_fp_prop:s0
 
 # Radio
 ro.vendor.ril.svlte1x  u:object_r:vendor_radio_prop:s0
@@ -26,3 +26,9 @@ ro.vendor.camera.res.fmq.size  u:object_r:vendor_camera_res_prop:s0
 ro.vendor.nfc.port                              u:object_r:vendor_nfc_prop:s0
 
 ro.vendor.ril.oem.btmac      u:object_r:vendor_radio_prop:s0
+
+ro.vendor.config.use_compaction    u:object_r:vendor_config_prop:s0
+ro.vendor.config.compact_action_1    u:object_r:vendor_config_prop:s0
+ro.vendor.config.compact_action_2    u:object_r:vendor_config_prop:s0
+ro.vendor.config.compact_procstate_throttle   u:object_r:vendor_config_prop:s0
+
