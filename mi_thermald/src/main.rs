@@ -160,7 +160,7 @@ impl SysfsNode {
         let _ = self.file.set_len(0);
 
         if let Err(e) = self.file.write_all(value.as_bytes()) {
-            eprintln!("Failed to write string to {}: {}", value, self.path, e);
+            eprintln!("Failed to write string '{}' to {}: {}", value, self.path, e);
         }
     }
 }
