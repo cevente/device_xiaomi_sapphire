@@ -1,6 +1,3 @@
-# Lunaris Aosp
-ro.lunaris.maintainer=@Angelpro09_Devv
-
 # App
 ro.launcher.blur.appLaunch=1
 
