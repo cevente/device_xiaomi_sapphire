@@ -141,8 +141,9 @@ BOARD_KERNEL_CMDLINE := \
     disable_dma32=on \
     rcu_nocbs=all \
     rcu_normal=1 \
-    rcu_expedited=1 \
-    qcom_geni_serial.con_enabled=0
+    qcom_geni_serial.con_enabled=0 \
+    quiet \
+    loglevel=2
 
 # Kernel prebuilt
 TARGET_KERNEL_ARCH := arm64
