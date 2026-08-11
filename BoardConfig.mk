@@ -308,3 +308,8 @@ SOONG_CONFIG_XIAOMI_SM6225_livedisplay_support_sunlight_enhancement ?= true
 WITH_DEXPREOPT := true
 WITH_DEXPREOPT_BOOT_IMG_AND_SYSTEM_SERVER_ONLY := false
 DONT_DEXPREOPT_PREBUILTS := true
+
+# Graphics & Display Post-Processing
+TARGET_USES_COLOR_METADATA := true
+TARGET_USES_DISPLAY_RENDER_INTENTS := true
+TARGET_USES_DRM_PP := true
