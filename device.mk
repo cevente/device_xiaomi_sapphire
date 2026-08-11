@@ -700,7 +700,4 @@ PRODUCT_COPY_FILES += \
 
 # High-Resolution Bluetooth Codec Packages
 PRODUCT_PACKAGES += \
-    libaptXA2DP \
-    libaptXHD \
-    libldacBT_dec \
     libldacBT_enc
