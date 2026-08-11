@@ -18,7 +18,7 @@ vendor_public_prop(vendor_wifimac_prop)
 
 # vendor_public_prop(vendor_default_prop)
 # vendor_public_prop(vendor_config_prop)
-
+vendor_restricted_prop(vendor_config_prop)
 type vendor_btmac_prop, property_type, vendor_property_type;
 type vendor_prefetch_prop, property_type, vendor_property_type;
 type vendor_config_prop, property_type, vendor_property_type;
