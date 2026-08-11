@@ -691,3 +691,13 @@ PRODUCT_PROPERTY_OVERRIDES += \
     dalvik.vm.boot-dex2oat-threads=6 \
     dalvik.vm.boot-dex2oat-cpu-set=0,1,2,3,4,5,6,7
 
+# Desktop Windowing / Freeform Permissions
+PRODUCT_COPY_FILES += \
+    frameworks/native/data/etc/android.software.freeform_management.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.software.freeform_management.xml
+
+# High-Resolution Bluetooth Codec Packages
+PRODUCT_PACKAGES += \
+    libaptXA2DP \
+    libaptXHD \
+    libldacBT_dec \
+    libldacBT_enc
