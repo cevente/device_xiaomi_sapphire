@@ -13,7 +13,6 @@ use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -102,6 +101,13 @@ const PROACTIVE_CHG_TEMP_THRESHOLD: i32 = 38500;
 const SCREEN_OFF_SLEEP: u64 = 8;
 const NORMAL_SLEEP: u64 = 3;
 const HOT_SLEEP: u64 = 1;
+
+// ── Global signal handler ───────────────────────────────────────────────────
+static RUNNING: AtomicBool = AtomicBool::new(true);
+
+extern "C" fn handle_sig(_sig: libc::c_int) {
+    RUNNING.store(false, Ordering::SeqCst);
+}
 
 // ── High-Performance I/O Wrapper ────────────────────────────────────────────
 struct SysfsNode {
@@ -201,6 +207,12 @@ fn main() {
     println!(" Smart Idle Charge Control | Screen-ON Limits Shifted +1.5°C");
     println!("============================================================");
 
+    // ── Signal Handling ──────────────────────────────────────────────────
+    unsafe {
+        libc::signal(libc::SIGINT, handle_sig as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, handle_sig as libc::sighandler_t);
+    }
+
     // Initialise cached sensor nodes
     let mut node_t_pa = SysfsNode::new(TZ_PA, true);
     let mut node_t_quiet = SysfsNode::new(TZ_QUIET, true);
@@ -271,16 +283,8 @@ fn main() {
     let mut last_t_battery = 35000;
     let mut last_t_hvx = 35000;
 
-    // Signal Handling setup
-    let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
-    ctrlc::set_handler(move || {
-        println!("\n[DAEMON] Caught termination signal. Commencing clean exit...");
-        r.store(false, Ordering::SeqCst);
-    }).expect("Error setting Ctrl-C handler");
-
     // ── Runtime loop ──────────────────────────────────────────────────────
-    while running.load(Ordering::SeqCst) {
+    while RUNNING.load(Ordering::SeqCst) {
         // ── Read sensors with Failsafe Fallbacks ─────────────────────────
         let t_pa = read_sensor_safe!(node_t_pa, last_t_pa);
         let t_quiet = read_sensor_safe!(node_t_quiet, last_t_quiet);
