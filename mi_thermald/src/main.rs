@@ -13,6 +13,7 @@ use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -68,8 +69,8 @@ const WEIGHT_SUM: i32 = 1000;
 const COMPENSATION: i32 = 0;
 
 // ── Thermal stepwise/monitor configurations ────────────────────────────────
-const CPU0_TRIG: [i32; 4] = [34000, 37000, 40000, 43000];
-const CPU0_CLR: [i32; 4] = [32000, 35000, 38000, 41000];
+const CPU0_TRIG: [i32; 4] = [36000, 39000, 43000, 45000];
+const CPU0_CLR: [i32; 4] = [34000, 37000, 41000, 43000];
 const CPU0_TARGET: [i32; 4] = [1804800, 1516800, 1190400, 691200];
 const CPU0_DEFAULT: i32 = 1900800;
 
@@ -94,29 +95,13 @@ const BOOST_DISABLED_STR: &str = "0 0 0 0 0 0 0 0";
 // ── Predictive control constants ──────────────────────────────────────────
 const THERMAL_SPIKE_THRESHOLD_NORMALIZED: i32 = 750;
 const PROACTIVE_CPU_TEMP_BOOST: i32 = 3000;
-const PROACTIVE_BOOST_TEMP_THRESHOLD: i32 = 34500;
+const PROACTIVE_BOOST_TEMP_THRESHOLD: i32 = 37000;
 const PROACTIVE_CHG_TEMP_THRESHOLD: i32 = 38500;
 
 // ── Sleep duration constants ──────────────────────────────────────────────
 const SCREEN_OFF_SLEEP: u64 = 8;
 const NORMAL_SLEEP: u64 = 3;
 const HOT_SLEEP: u64 = 1;
-
-// ── Signal handling with direct FFI (zero external dependencies) ────────────
-static RUNNING: AtomicBool = AtomicBool::new(true);
-
-// Signal constants (Linux/Android)
-const SIGINT: i32 = 2;
-const SIGTERM: i32 = 15;
-
-extern "C" fn handle_sig(_sig: i32) {
-    RUNNING.store(false, Ordering::SeqCst);
-}
-
-// Direct FFI binding to system signal function
-extern "C" {
-    fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
-}
 
 // ── High-Performance I/O Wrapper ────────────────────────────────────────────
 struct SysfsNode {
@@ -216,15 +201,6 @@ fn main() {
     println!(" Smart Idle Charge Control | Screen-ON Limits Shifted +1.5°C");
     println!("============================================================");
 
-    // ── Signal Handling (zero external dependencies) ─────────────────────
-    // SAFETY: The signal function is a standard POSIX system call that is
-    // safe to call in this context. The signal handlers are simple functions
-    // that only set an atomic flag, which is safe to do in a signal context.
-    unsafe {
-        signal(SIGINT, handle_sig);
-        signal(SIGTERM, handle_sig);
-    }
-
     // Initialise cached sensor nodes
     let mut node_t_pa = SysfsNode::new(TZ_PA, true);
     let mut node_t_quiet = SysfsNode::new(TZ_QUIET, true);
@@ -295,8 +271,16 @@ fn main() {
     let mut last_t_battery = 35000;
     let mut last_t_hvx = 35000;
 
+    // Signal Handling setup
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        println!("\n[DAEMON] Caught termination signal. Commencing clean exit...");
+        r.store(false, Ordering::SeqCst);
+    }).expect("Error setting Ctrl-C handler");
+
     // ── Runtime loop ──────────────────────────────────────────────────────
-    while RUNNING.load(Ordering::SeqCst) {
+    while running.load(Ordering::SeqCst) {
         // ── Read sensors with Failsafe Fallbacks ─────────────────────────
         let t_pa = read_sensor_safe!(node_t_pa, last_t_pa);
         let t_quiet = read_sensor_safe!(node_t_quiet, last_t_quiet);
