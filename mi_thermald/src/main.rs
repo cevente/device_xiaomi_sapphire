@@ -102,11 +102,20 @@ const SCREEN_OFF_SLEEP: u64 = 8;
 const NORMAL_SLEEP: u64 = 3;
 const HOT_SLEEP: u64 = 1;
 
-// ── Global signal handler ───────────────────────────────────────────────────
+// ── Signal handling with direct FFI (zero external dependencies) ────────────
 static RUNNING: AtomicBool = AtomicBool::new(true);
 
-extern "C" fn handle_sig(_sig: libc::c_int) {
+// Signal constants (Linux/Android)
+const SIGINT: i32 = 2;
+const SIGTERM: i32 = 15;
+
+extern "C" fn handle_sig(_sig: i32) {
     RUNNING.store(false, Ordering::SeqCst);
+}
+
+// Direct FFI binding to system signal function
+extern "C" {
+    fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
 }
 
 // ── High-Performance I/O Wrapper ────────────────────────────────────────────
@@ -207,10 +216,10 @@ fn main() {
     println!(" Smart Idle Charge Control | Screen-ON Limits Shifted +1.5°C");
     println!("============================================================");
 
-    // ── Signal Handling ──────────────────────────────────────────────────
+    // ── Signal Handling (zero external dependencies) ─────────────────────
     unsafe {
-        libc::signal(libc::SIGINT, handle_sig as libc::sighandler_t);
-        libc::signal(libc::SIGTERM, handle_sig as libc::sighandler_t);
+        signal(SIGINT, handle_sig);
+        signal(SIGTERM, handle_sig);
     }
 
     // Initialise cached sensor nodes
