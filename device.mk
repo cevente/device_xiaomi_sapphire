@@ -436,6 +436,7 @@ PRODUCT_ENFORCE_RRO_TARGETS := *
 
 PRODUCT_PACKAGES += \
     ApertureResSapphire \
+    BluetoothResOverlay \
     CarrierConfigResCommon \
     FrameworksResCommon \
     FrameworksResTarget \
