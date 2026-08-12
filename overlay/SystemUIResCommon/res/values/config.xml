@@ -2,6 +2,7 @@
 <!--
      Copyright (C) 2023 The LineageOS Project
      SPDX-License-Identifier: Apache-2.0
+     Updated with proper AOD brightness mapping for 1800 nits display
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
 
@@ -19,33 +20,55 @@
     <!-- ==================== INTEGER ARRAYS ==================== -->
 
     <!-- Doze: Table that translates sensor values from the doze_brightness_sensor_type sensor
-               to brightness values; -1 means keeping the current brightness. -->
+               to brightness values (mapped to 4095-scale backlight)
+               For 1800 nits display, values scaled appropriately for AOD -->
     <integer-array name="config_doze_brightness_sensor_to_brightness">
-        <item>-1</item>
-        <item>-1</item>
-        <item>-1</item>
-        <item>1</item>
-        <item>255</item>
-        <item>1</item>
+        <item>-1</item>    <!-- Sensor 0: No change -->
+        <item>-1</item>    <!-- Sensor 1: No change -->
+        <item>-1</item>    <!-- Sensor 2: No change -->
+        <item>1</item>     <!-- Sensor 3: Minimum (~0.4 nits) -->
+        <item>50</item>    <!-- Sensor 4: Very dim (~22 nits) -->
+        <item>100</item>   <!-- Sensor 5: Dim (~44 nits) -->
+        <item>200</item>   <!-- Sensor 6: Low (~88 nits) -->
+        <item>350</item>   <!-- Sensor 7: Medium (~154 nits) -->
+        <item>500</item>   <!-- Sensor 8: Bright (~220 nits) -->
+        <item>700</item>   <!-- Sensor 9: Very bright (~308 nits) -->
+        <item>1000</item>  <!-- Sensor 10: High (~440 nits) -->
+        <item>1500</item>  <!-- Sensor 11: Very high (~660 nits) -->
+        <item>2047</item>  <!-- Sensor 12: Max AOD (~900 nits) -->
     </integer-array>
 
     <!-- Doze: Table that translates sensor values from the doze_brightness_sensor_type sensor
-               to an opacity value for a black scrim that is overlayed in AOD1.
+               to an opacity value for a black scrim that is overlayed in AOD.
                Valid range is from 0 (transparent) to 255 (opaque).
-               -1 means keeping the current opacity. -->
+               -1 means keeping the current opacity.
+               Higher opacity = darker screen, lower opacity = brighter screen -->
     <integer-array name="config_doze_brightness_sensor_to_scrim_opacity">
-        <item>-1</item>
-        <item>0</item>
-        <item>0</item>
-        <item>0</item>
-        <item>0</item>
-        <item>0</item>
+        <item>-1</item>    <!-- Sensor 0: No change -->
+        <item>255</item>   <!-- Sensor 1: Fully opaque (darkest) -->
+        <item>220</item>   <!-- Sensor 2: Very opaque -->
+        <item>180</item>   <!-- Sensor 3: Mostly opaque -->
+        <item>140</item>   <!-- Sensor 4: Partially opaque -->
+        <item>100</item>   <!-- Sensor 5: Semi-transparent -->
+        <item>70</item>    <!-- Sensor 6: Mostly transparent -->
+        <item>45</item>    <!-- Sensor 7: Very transparent -->
+        <item>25</item>    <!-- Sensor 8: Barely visible -->
+        <item>10</item>    <!-- Sensor 9: Almost transparent -->
+        <item>3</item>     <!-- Sensor 10: Very slight tint -->
+        <item>1</item>     <!-- Sensor 11: Minimal tint -->
+        <item>0</item>     <!-- Sensor 12: Fully transparent (brightest) -->
     </integer-array>
 
     <!-- ==================== BOOLS ==================== -->
 
     <!-- Doze: does this device support STATE_DOZE? -->
     <bool name="doze_display_state_supported">true</bool>
+
+    <!-- Doze: Use brightness sensor for AOD brightness control -->
+    <bool name="doze_use_brightness_sensor">true</bool>
+
+    <!-- Doze: Enable dynamic AOD brightness -->
+    <bool name="doze_dynamic_brightness_enabled">true</bool>
 
     <!-- ==================== DIMENS ==================== -->
 
@@ -61,6 +84,15 @@
 
     <!-- If not zero, limits the internal screen recorder's framerate to the set value. -->
     <integer name="config_screenRecorderMaxFramerate">60</integer>
+
+    <!-- Default AOD brightness level (mapped to 4095-scale) -->
+    <integer name="config_doze_default_brightness">200</integer>
+
+    <!-- Minimum AOD brightness -->
+    <integer name="config_doze_minimum_brightness">1</integer>
+
+    <!-- Maximum AOD brightness (capped to prevent battery drain and burn-in) -->
+    <integer name="config_doze_maximum_brightness">800</integer>
 
     <!-- ==================== STRINGS ==================== -->
 
