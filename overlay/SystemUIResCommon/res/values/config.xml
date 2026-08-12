@@ -85,15 +85,6 @@
     <!-- If not zero, limits the internal screen recorder's framerate to the set value. -->
     <integer name="config_screenRecorderMaxFramerate">60</integer>
 
-    <!-- Default AOD brightness level (mapped to 4095-scale) -->
-    <integer name="config_doze_default_brightness">200</integer>
-
-    <!-- Minimum AOD brightness -->
-    <integer name="config_doze_minimum_brightness">1</integer>
-
-    <!-- Maximum AOD brightness (capped to prevent battery drain and burn-in) -->
-    <integer name="config_doze_maximum_brightness">800</integer>
-
     <!-- ==================== STRINGS ==================== -->
 
     <!-- Type of a sensor that provides a low-power estimate of the desired display
