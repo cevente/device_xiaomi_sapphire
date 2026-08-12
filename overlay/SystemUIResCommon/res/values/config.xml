@@ -49,6 +49,8 @@
 
     <!-- ==================== DIMENS ==================== -->
 
+    <dimen name="large_dialog_width">348dp</dimen>
+          
     <!-- Pixel pitch (presumably in microns or similar units) -->
     <item type="dimen" name="pixel_pitch">64.41</item>
 
