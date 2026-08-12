@@ -250,9 +250,9 @@
 
     <!-- Auto brightness LCD backlight values - 8-step mapping for 1800 nits display -->
     <integer-array name="config_autoBrightnessLcdBacklightValues">
+        <item>1</item>
         <item>10</item>
-        <item>20</item>
-        <item>40</item>
+        <item>30</item>
         <item>70</item>
         <item>110</item>
         <item>160</item>
@@ -262,8 +262,8 @@
 
     <!-- Auto brightness levels - 7 thresholds for 8 steps -->
     <integer-array name="config_autoBrightnessLevels">
-        <item>10</item>
-        <item>30</item>
+        <item>1</item>
+        <item>40</item>
         <item>60</item>
         <item>100</item>
         <item>150</item>
@@ -273,7 +273,7 @@
 
     <!-- Auto brightness display values in nits - Mapped to 1800 nits peak -->
     <array name="config_autoBrightnessDisplayValuesNits">
-        <item>4.3</item>     <!-- Backlight 10  -->
+        <item>1.0</item>     <!-- Backlight 10  -->
         <item>70.6</item>    <!-- Backlight 20  -->
         <item>141.2</item>   <!-- Backlight 40  -->
         <item>247.1</item>   <!-- Backlight 70  -->
@@ -291,7 +291,7 @@
 
     <!-- Screen brightness in nits -->
     <array name="config_screenBrightnessNits">
-        <item>4.3</item>
+        <item>1.0</item>
         <item>1800.0</item>
     </array>
 
