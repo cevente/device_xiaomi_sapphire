@@ -2,9 +2,7 @@
 <!--
      Copyright (C) 2023 The LineageOS Project
      SPDX-License-Identifier: Apache-2.0
-     Fixed auto-brightness for 4095-scale backlight with 1800 nits peak
 -->
-
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
 
     <!-- An Array of "[ConnectivityManager connectionType],
@@ -245,72 +243,29 @@
         <item>10</item>
         <item>14</item>
     </integer-array>
-    <integer-array name="config_ambientThresholdsOfPeakRefreshRate">
+         <integer-array name="config_ambientThresholdsOfPeakRefreshRate">
         <item>-1</item>
         <item>20</item>
     </integer-array>
-
-    <!-- ==================== CORRECTED AUTO-BRIGHTNESS ARRAYS ==================== -->
-
-    <!-- Auto brightness levels (lux thresholds) - 15 entries -->
-    <integer-array name="config_autoBrightnessLevels">
-        <item>1</item>
-        <item>5</item>
+    <integer-array name="config_autoBrightnessLcdBacklightValues">
         <item>10</item>
         <item>20</item>
-        <item>30</item>
-        <item>60</item>
-        <item>100</item>
+        <item>40</item>
+        <item>70</item>
+        <item>110</item>
+        <item>160</item>
         <item>200</item>
-        <item>500</item>
-        <item>1000</item>
-        <item>3000</item>
-        <item>10000</item>
-        <item>30000</item>
-        <item>60000</item>
-        <item>100000</item>
+        <item>255</item>
     </integer-array>
-
-    <!-- Auto brightness LCD backlight values - 16 entries (N+1) -->
-    <integer-array name="config_autoBrightnessLcdBacklightValues">
-        <item>1</item>
+    <integer-array name="config_autoBrightnessLevels">
+        <item>10</item>
         <item>30</item>
         <item>60</item>
         <item>100</item>
         <item>150</item>
-        <item>200</item>
-        <item>300</item>
-        <item>500</item>
-        <item>800</item>
-        <item>1200</item>
-        <item>1600</item>
-        <item>2048</item>
-        <item>2600</item>
-        <item>3200</item>
-        <item>3700</item>
-        <item>4095</item>
+        <item>210</item>
+        <item>255</item>
     </integer-array>
-
-    <!-- Auto brightness display values in nits - 16 entries (MUST match backlight array) -->
-    <array name="config_autoBrightnessDisplayValuesNits">
-        <item>1.0</item>      <!-- Min -->
-        <item>4.0</item>      <!-- Very dim -->
-        <item>10.0</item>     <!-- Low indoor -->
-        <item>20.0</item>     <!-- Moderate low -->
-        <item>35.0</item>     <!-- Dim indoor -->
-        <item>60.0</item>     <!-- Bright indoor -->
-        <item>100.0</item>    <!-- Overcast -->
-        <item>200.0</item>    <!-- Cloudy -->
-        <item>400.0</item>    <!-- Bright outdoor -->
-        <item>600.0</item>    <!-- HBM entry -->
-        <item>800.0</item>    <!-- Mid HBM -->
-        <item>1100.0</item>   <!-- High HBM -->
-        <item>1400.0</item>   <!-- Very high -->
-        <item>1600.0</item>   <!-- Near peak -->
-        <item>1750.0</item>   <!-- Almost peak -->
-        <item>1800.0</item>   <!-- Peak -->
-    </array>
-
     <!-- Default refresh rate in the zone defined by brightness and ambient thresholds.
          If non-positive, then the refresh rate is unchanged even if thresholds are configured. -->
     <integer name="config_defaultRefreshRateInZone">120</integer>
