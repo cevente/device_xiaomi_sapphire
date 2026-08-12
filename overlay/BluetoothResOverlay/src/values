@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <integer name="a2dp_source_codec_priority_lc3">-1</integer>
-    <integer name="a2dp_source_codec_priority_lhdcv1">-1</integer>
-    <integer name="a2dp_source_codec_priority_lhdcv2">-1</integer>
-    <integer name="a2dp_source_codec_priority_lhdcv3">-1</integer>
-    <integer name="a2dp_source_codec_priority_lhdcv5">-1</integer>
-</resources>
