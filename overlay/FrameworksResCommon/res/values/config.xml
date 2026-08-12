@@ -243,10 +243,12 @@
         <item>10</item>
         <item>14</item>
     </integer-array>
-         <integer-array name="config_ambientThresholdsOfPeakRefreshRate">
+    <integer-array name="config_ambientThresholdsOfPeakRefreshRate">
         <item>-1</item>
         <item>20</item>
     </integer-array>
+
+    <!-- Auto brightness LCD backlight values - 8-step mapping for 1800 nits display -->
     <integer-array name="config_autoBrightnessLcdBacklightValues">
         <item>10</item>
         <item>20</item>
@@ -257,6 +259,8 @@
         <item>200</item>
         <item>255</item>
     </integer-array>
+
+    <!-- Auto brightness levels - 7 thresholds for 8 steps -->
     <integer-array name="config_autoBrightnessLevels">
         <item>10</item>
         <item>30</item>
@@ -266,6 +270,31 @@
         <item>210</item>
         <item>255</item>
     </integer-array>
+
+    <!-- Auto brightness display values in nits - Mapped to 1800 nits peak -->
+    <array name="config_autoBrightnessDisplayValuesNits">
+        <item>4.3</item>     <!-- Backlight 10  -->
+        <item>70.6</item>    <!-- Backlight 20  -->
+        <item>141.2</item>   <!-- Backlight 40  -->
+        <item>247.1</item>   <!-- Backlight 70  -->
+        <item>388.2</item>   <!-- Backlight 110 -->
+        <item>564.7</item>   <!-- Backlight 160 -->
+        <item>705.9</item>   <!-- Backlight 200 -->
+        <item>1800.0</item>  <!-- Backlight 255 -->
+    </array>
+
+    <!-- Screen brightness backlight values -->
+    <integer-array name="config_screenBrightnessBacklight">
+        <item>1</item>
+        <item>255</item>
+    </integer-array>
+
+    <!-- Screen brightness in nits -->
+    <array name="config_screenBrightnessNits">
+        <item>4.3</item>
+        <item>1800.0</item>
+    </array>
+
     <!-- Default refresh rate in the zone defined by brightness and ambient thresholds.
          If non-positive, then the refresh rate is unchanged even if thresholds are configured. -->
     <integer name="config_defaultRefreshRateInZone">120</integer>
