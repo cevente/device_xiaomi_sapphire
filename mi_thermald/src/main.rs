@@ -217,6 +217,9 @@ fn main() {
     println!("============================================================");
 
     // ── Signal Handling (zero external dependencies) ─────────────────────
+    // SAFETY: The signal function is a standard POSIX system call that is
+    // safe to call in this context. The signal handlers are simple functions
+    // that only set an atomic flag, which is safe to do in a signal context.
     unsafe {
         signal(SIGINT, handle_sig);
         signal(SIGTERM, handle_sig);
