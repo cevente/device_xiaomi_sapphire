@@ -16,7 +16,7 @@
     <dimen name="hover_system_icons_container_padding_end">6.0dip</dimen>
 
     <!-- Large dialog width -->
-    <dimen name="large_dialog_width">512.0dip</dimen>
+    <dimen name="large_dialog_width">480.0dip</dimen>
      
     <!-- Notification panel margin horizontal -->
     <dimen name="notification_panel_margin_horizontal">24.0dip</dimen>
