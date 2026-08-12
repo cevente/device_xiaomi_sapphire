@@ -115,14 +115,6 @@
     <!-- If not zero, limits the internal screen recorder's framerate to the set value. -->
     <integer name="config_screenRecorderMaxFramerate">60</integer>
 
-    <!-- Default AOD brightness level (mapped to 4095-scale) -->
-    <integer name="config_doze_default_brightness">150</integer>
-
-    <!-- Minimum AOD brightness -->
-    <integer name="config_doze_minimum_brightness">1</integer>
-
-    <!-- Maximum AOD brightness (capped to prevent battery drain and burn-in) -->
-    <integer name="config_doze_maximum_brightness">700</integer>
 
     <!-- ==================== STRINGS ==================== -->
 
