@@ -228,7 +228,7 @@
 
     <!-- ==================== INTEGER ARRAYS ==================== -->
 
-    <!-- Ambient brightening thresholds -->
+<!-- Ambient brightening thresholds -->
     <integer-array name="config_ambientBrighteningThresholds">
         <item>4</item>
         <item>5</item>
