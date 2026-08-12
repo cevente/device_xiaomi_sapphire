@@ -68,8 +68,8 @@ const WEIGHT_SUM: i32 = 1000;
 const COMPENSATION: i32 = 0;
 
 // ── Thermal stepwise/monitor configurations ────────────────────────────────
-const CPU0_TRIG: [i32; 4] = [36000, 39000, 43000, 45000];
-const CPU0_CLR: [i32; 4] = [34000, 37000, 41000, 43000];
+const CPU0_TRIG: [i32; 4] = [34000, 37000, 40000, 43000];
+const CPU0_CLR: [i32; 4] = [32000, 35000, 38000, 41000];
 const CPU0_TARGET: [i32; 4] = [1804800, 1516800, 1190400, 691200];
 const CPU0_DEFAULT: i32 = 1900800;
 
@@ -94,7 +94,7 @@ const BOOST_DISABLED_STR: &str = "0 0 0 0 0 0 0 0";
 // ── Predictive control constants ──────────────────────────────────────────
 const THERMAL_SPIKE_THRESHOLD_NORMALIZED: i32 = 750;
 const PROACTIVE_CPU_TEMP_BOOST: i32 = 3000;
-const PROACTIVE_BOOST_TEMP_THRESHOLD: i32 = 37000;
+const PROACTIVE_BOOST_TEMP_THRESHOLD: i32 = 34500;
 const PROACTIVE_CHG_TEMP_THRESHOLD: i32 = 38500;
 
 // ── Sleep duration constants ──────────────────────────────────────────────
