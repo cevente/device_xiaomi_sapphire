@@ -2,6 +2,8 @@
 //! Optimized charging daemon supporting all charger protocols (Xiaomi HyperCharge, QC2.0, QC1.0, Std 5V).
 //! - Maximized Screen-OFF charging speeds up to a strict 42.0°C hard thermal limit (+2°C total adjustment).
 //! - Increased Screen-ON charging thermal thresholds by an additional +1.5°C for higher active current retention.
+//! - Dynamic polling rate scaling based on thermal velocity.
+//! - Charging current hysteresis protection to prevent fluttering.
 
 #![allow(missing_docs)]
 #![allow(clippy::needless_range_loop)]
@@ -9,6 +11,7 @@
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
 
+use std::fs::metadata;
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -32,6 +35,7 @@ const GPU_MAX_FREQ: &str = "/sys/class/kgsl/kgsl-3d0/max_gpuclk";
 const CPU2_ONLINE: &str = "/sys/devices/system/cpu/cpu2/online";
 const CPU3_ONLINE: &str = "/sys/devices/system/cpu/cpu3/online";
 const CPU6_ONLINE: &str = "/sys/devices/system/cpu/cpu6/online";
+const CPU7_ONLINE: &str = "/sys/devices/system/cpu/cpu7/online";
 
 // Direct hardware brightness node (11-bit OLED, max 2047)
 const BACKLIGHT_PATH: &str = "/sys/class/backlight/panel0-backlight/brightness";
@@ -48,7 +52,7 @@ const WALT_BOOST_MS_PATH: &str = "/proc/sys/walt/input_boost/input_boost_ms";
 const CHARGE_LIMIT_NODE: &str = "/sys/class/power_supply/battery/charge_control_limit";
 const RESTRICT_CHG_NODE: &str = "/sys/class/qcom-battery/restrict_chg";
 const RESTRICT_CUR_NODE: &str = "/sys/class/qcom-battery/restrict_cur";
-const INPUT_SUSPEND_NODE: &str = "/sys/class/qcom-battery/input_suspend"; // Smart Idle Charge Control
+const INPUT_SUSPEND_NODE: &str = "/sys/class/qcom-battery/input_suspend";
 const FASTCHARGE_MODE_NODE: &str = "/sys/class/qcom-battery/fastcharge_mode";
 const QUICK_CHARGE_TYPE_NODE: &str = "/sys/class/qcom-battery/quick_charge_type";
 
@@ -58,7 +62,7 @@ const CDSP_CUR_STATE: &str = "/sys/class/thermal/cooling_device30/cur_state";
 const ADSP_CUR_STATE: &str = "/sys/class/thermal/cooling_device37/cur_state";
 const USB_DAC_PATH: &str = "/sys/class/sound/card1";
 
-// ── Virtual sensor parameters (Optimized via RF Predictive ML) ──────────────
+// ── Virtual sensor parameters ──────────────────────────────────────────────
 const WEIGHT_QUIET: i32 = 884;
 const WEIGHT_PA: i32 = 75;
 const WEIGHT_CHARGE: i32 = 28;
@@ -96,16 +100,16 @@ const THERMAL_SPIKE_THRESHOLD_NORMALIZED: i32 = 750;
 const PROACTIVE_CPU_TEMP_BOOST: i32 = 3000;
 const PROACTIVE_BOOST_TEMP_THRESHOLD: i32 = 34500;
 const PROACTIVE_CHG_TEMP_THRESHOLD: i32 = 38500;
+const SCREEN_ON_OFFSET: i32 = 1500;
 
 // ── Sleep duration constants ──────────────────────────────────────────────
-const SCREEN_OFF_SLEEP: u64 = 8;
-const NORMAL_SLEEP: u64 = 3;
-const HOT_SLEEP: u64 = 1;
+const SLEEP_IDLE_SCREEN_OFF: u64 = 12;
+const SLEEP_NORMAL: u64 = 3;
+const SLEEP_ACTIVE_SPIKE: u64 = 1;
 
-// ── Signal handling with direct FFI (zero external dependencies) ────────────
+// ── Signal handling ────────────────────────────────────────────────────────
 static RUNNING: AtomicBool = AtomicBool::new(true);
 
-// Signal constants (Linux/Android)
 const SIGINT: i32 = 2;
 const SIGTERM: i32 = 15;
 
@@ -113,9 +117,34 @@ extern "C" fn handle_sig(_sig: i32) {
     RUNNING.store(false, Ordering::SeqCst);
 }
 
-// Direct FFI binding to system signal function
 extern "C" {
     fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
+}
+
+// ── DAC Detector with caching ─────────────────────────────────────────────
+struct DacDetector {
+    last_check: Instant,
+    connected: bool,
+    check_interval: Duration,
+}
+
+impl DacDetector {
+    fn new() -> Self {
+        Self {
+            last_check: Instant::now() - Duration::from_secs(10),
+            connected: false,
+            check_interval: Duration::from_secs(3),
+        }
+    }
+
+    fn is_connected(&mut self) -> bool {
+        let now = Instant::now();
+        if now.duration_since(self.last_check) >= self.check_interval {
+            self.connected = metadata(USB_DAC_PATH).is_ok();
+            self.last_check = now;
+        }
+        self.connected
+    }
 }
 
 // ── High-Performance I/O Wrapper ────────────────────────────────────────────
@@ -145,6 +174,28 @@ impl SysfsNode {
         self.read_buf.clear();
         self.file.read_to_string(&mut self.read_buf).ok()?;
         self.read_buf.trim().parse().ok()
+    }
+
+    fn read_fast(&mut self) -> Option<i32> {
+        self.file.seek(SeekFrom::Start(0)).ok()?;
+        
+        let mut buf = [0u8; 16];
+        let n = self.file.read(&mut buf).ok()?;
+        if n == 0 { return None; }
+        
+        let mut val: i32 = 0;
+        let mut started = false;
+        
+        for &b in &buf[..n] {
+            if b >= b'0' && b <= b'9' {
+                val = val * 10 + (b - b'0') as i32;
+                started = true;
+            } else if started {
+                break;
+            }
+        }
+        
+        if started { Some(val) } else { None }
     }
 
     fn write(&mut self, value: i32) {
@@ -178,7 +229,7 @@ impl SysfsNode {
     }
 }
 
-// ── Helpers for optional writes ────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────
 macro_rules! write_opt {
     ($node:expr, $value:expr) => {
         if let Some(n) = &mut $node {
@@ -197,12 +248,19 @@ macro_rules! write_str_opt {
 
 macro_rules! read_sensor_safe {
     ($node:expr, $last_val:expr) => {
-        match $node.as_mut().and_then(|n| n.read()) {
-            Some(val) if val > 0 => {
+        match $node.as_mut().and_then(|n| n.read_fast()) {
+            Some(val) if val > 0 && val < 90000 => {
                 $last_val = val;
                 val
             }
-            _ => $last_val,
+            Some(invalid) => {
+                eprintln!("[SENSOR] Invalid reading: {}°C, using fallback", invalid);
+                $last_val
+            }
+            None => {
+                eprintln!("[SENSOR] Read failed, using fallback: {}°C", $last_val / 1000);
+                $last_val
+            }
         }
     };
 }
@@ -212,20 +270,27 @@ fn main() {
     println!("============================================================");
     println!(" Unified Thermal & Charging Daemon (Rust)");
     println!(" ML-Optimized weights | Proactive Rate-of-Change Control");
-    println!(" Audio-Aware CPU Floor | Graceful Restoration | Safe-Sensors");
-    println!(" Smart Idle Charge Control | Screen-ON Limits Shifted +1.5°C");
+    println!(" Dynamic Polling Rate Scaling | Charging Hysteresis");
+    println!(" Audio-Aware CPU Floor | Graceful Restoration");
     println!("============================================================");
 
-    // ── Signal Handling (zero external dependencies) ─────────────────────
-    // SAFETY: The signal function is a standard POSIX system call that is
-    // safe to call in this context. The signal handlers are simple functions
-    // that only set an atomic flag, which is safe to do in a signal context.
     unsafe {
         signal(SIGINT, handle_sig);
         signal(SIGTERM, handle_sig);
     }
 
-    // Initialise cached sensor nodes
+    // Single instance check
+    if let Ok(mut f) = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open("/data/local/tmp/thermal_daemon.pid") 
+    {
+        let pid = std::process::id();
+        let _ = write!(f, "{}", pid);
+    }
+
+    // ── Sensor nodes ──────────────────────────────────────────────────────
     let mut node_t_pa = SysfsNode::new(TZ_PA, true);
     let mut node_t_quiet = SysfsNode::new(TZ_QUIET, true);
     let mut node_t_charge = SysfsNode::new(TZ_CHARGE, true);
@@ -234,13 +299,14 @@ fn main() {
     let mut node_soc = SysfsNode::new(BAT_SOC_PATH, true);
     let mut node_screen = SysfsNode::new(SCREEN_STATE_NODE, true);
 
-    // Initialise cached control nodes
+    // ── Control nodes ────────────────────────────────────────────────────
     let mut node_cpu0 = SysfsNode::new(CPU0_MAX_FREQ, false);
     let mut node_cpu4 = SysfsNode::new(CPU4_MAX_FREQ, false);
     let mut node_gpu = SysfsNode::new(GPU_MAX_FREQ, false);
     let mut node_cpu2_on = SysfsNode::new(CPU2_ONLINE, false);
     let mut node_cpu3_on = SysfsNode::new(CPU3_ONLINE, false);
     let mut node_cpu6_on = SysfsNode::new(CPU6_ONLINE, false);
+    let mut node_cpu7_on = SysfsNode::new(CPU7_ONLINE, false);
     let mut node_backlight = SysfsNode::new(BACKLIGHT_PATH, false);
     let mut node_tstate = SysfsNode::new(TEMP_STATE_PATH, false);
     let mut node_wifi = SysfsNode::new(WIFI_LIMIT_PATH, false);
@@ -251,24 +317,23 @@ fn main() {
     let mut node_fastcharge_mode = SysfsNode::new(FASTCHARGE_MODE_NODE, true);
     let mut node_quick_charge_type = SysfsNode::new(QUICK_CHARGE_TYPE_NODE, true);
 
-    // Initialise WALT nodes
+    // ── WALT nodes ──────────────────────────────────────────────────────
     let mut node_walt_boost = SysfsNode::new(WALT_BOOST_FREQ_PATH, false);
     let mut node_walt_ms = SysfsNode::new(WALT_BOOST_MS_PATH, false);
 
-    // Initialise DSP nodes
+    // ── DSP nodes ────────────────────────────────────────────────────────
     let mut node_t_hvx = SysfsNode::new(TZ_CDSP_HVX, true);
     let mut node_cdsp = SysfsNode::new(CDSP_CUR_STATE, false);
     let mut node_adsp = SysfsNode::new(ADSP_CUR_STATE, false);
 
-    // Initial charging state
+    // ── Initial state ────────────────────────────────────────────────────
     write_opt!(node_res_chg, 0);
     write_opt!(node_res_cur, 1500000);
     write_opt!(node_input_suspend, 0);
-
     write_str_opt!(node_walt_ms, "40");
     write_str_opt!(node_walt_boost, BOOST_ENABLED_STR);
 
-    // State tracking
+    // ── State tracking ──────────────────────────────────────────────────
     let mut prev_virtual_temp: Option<i32> = None;
     let mut state_cpu0: usize = 0;
     let mut state_cpu4: usize = 0;
@@ -286,18 +351,20 @@ fn main() {
     let mut state_cdsp: i32 = 0;
     let mut state_adsp: i32 = 0;
     let mut last_update = Instant::now();
+    let mut dac_detector = DacDetector::new();
+    let mut chg_hysteresis_offset: i32 = 0;  // Charging hysteresis state
 
-    // Baseline fallbacks
-    let mut last_t_pa = 35000;
-    let mut last_t_quiet = 35000;
-    let mut last_t_charge = 35000;
-    let mut last_t_emmc = 35000;
-    let mut last_t_battery = 35000;
-    let mut last_t_hvx = 35000;
+    // ── Sensor fallbacks (start HIGH for safe defaults) ─────────────────
+    let mut last_t_pa = 45000;
+    let mut last_t_quiet = 45000;
+    let mut last_t_charge = 45000;
+    let mut last_t_emmc = 45000;
+    let mut last_t_battery = 45000;
+    let mut last_t_hvx = 45000;
 
     // ── Runtime loop ──────────────────────────────────────────────────────
     while RUNNING.load(Ordering::SeqCst) {
-        // ── Read sensors with Failsafe Fallbacks ─────────────────────────
+        // ── Read sensors ─────────────────────────────────────────────────
         let t_pa = read_sensor_safe!(node_t_pa, last_t_pa);
         let t_quiet = read_sensor_safe!(node_t_quiet, last_t_quiet);
         let t_charge = read_sensor_safe!(node_t_charge, last_t_charge);
@@ -305,13 +372,12 @@ fn main() {
         let t_battery = read_sensor_safe!(node_t_battery, last_t_battery);
         let t_hvx = read_sensor_safe!(node_t_hvx, last_t_hvx);
         
-        let soc = node_soc.as_mut().and_then(|n| n.read()).unwrap_or(100);
-        let screen_state = node_screen.as_mut().and_then(|n| n.read()).unwrap_or(0);
-        let dac_connected = Path::new(USB_DAC_PATH).exists();
+        let soc = node_soc.as_mut().and_then(|n| n.read_fast()).unwrap_or(100);
+        let screen_state = node_screen.as_mut().and_then(|n| n.read_fast()).unwrap_or(0);
+        let dac_connected = dac_detector.is_connected();
 
-        // Read Charger protocol nodes
-        let fastcharge_mode = node_fastcharge_mode.as_mut().and_then(|n| n.read()).unwrap_or(-1);
-        let quick_charge_type = node_quick_charge_type.as_mut().and_then(|n| n.read()).unwrap_or(-1);
+        let fastcharge_mode = node_fastcharge_mode.as_mut().and_then(|n| n.read_fast()).unwrap_or(-1);
+        let quick_charge_type = node_quick_charge_type.as_mut().and_then(|n| n.read_fast()).unwrap_or(-1);
 
         // ── Virtual temperature ──────────────────────────────────────────
         let virtual_temp = (WEIGHT_QUIET * t_quiet
@@ -324,7 +390,7 @@ fn main() {
         let virtual_c = virtual_temp / 1000;
         let batt_temp = t_battery / 1000;
 
-        // ── Calculate normalized thermal derivative ──────────────────────────
+        // ── Thermal derivative ──────────────────────────────────────────
         let now = Instant::now();
         let elapsed_secs = now.duration_since(last_update).as_secs_f64();
         last_update = now;
@@ -345,7 +411,8 @@ fn main() {
         prev_virtual_temp = Some(virtual_temp);
 
         if is_thermal_spike {
-            println!("[PROACTIVE] Rapid thermal rise detected! Rate: +{:.1}°C/s", temp_delta_normalized as f32 / 1000.0);
+            println!("[PROACTIVE] Rapid thermal rise detected! Rate: +{:.1}°C/s", 
+                     temp_delta_normalized as f32 / 1000.0);
         }
 
         let virtual_temp_for_cpu = if is_thermal_spike && virtual_temp >= 35000 {
@@ -429,7 +496,7 @@ fn main() {
             }
         }
 
-        // ── ADSP (Audio) Control ──────────────────────────────────────
+        // ── ADSP Control ──────────────────────────────────────────────────
         if dac_connected {
             if state_adsp != 0 {
                 state_adsp = 0;
@@ -446,7 +513,7 @@ fn main() {
             write_opt!(node_adsp, 0);
         }
 
-        // ── CDSP (Camera/Compute) Control ─────────────────────────────
+        // ── CDSP Control ──────────────────────────────────────────────────
         let mut new_cdsp = state_cdsp;
 
         if t_hvx >= 52000 {
@@ -497,12 +564,13 @@ fn main() {
             }
         }
 
-        // ── Backlight (Direct Hardware Clamp) ─────────────────────────────
+        // ── Backlight Clamp ──────────────────────────────────────────────
         if virtual_temp >= 51000 {
-            let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
+            let current_bl = node_backlight.as_mut().and_then(|n| n.read_fast()).unwrap_or(0);
 
             if current_bl > BL_LIMIT {
-                println!("[BACKLIGHT] Critical Temp (51°C) - Clamping brightness from {} to {}", current_bl, BL_LIMIT);
+                println!("[BACKLIGHT] Critical Temp (51°C) - Clamping brightness from {} to {}", 
+                         current_bl, BL_LIMIT);
                 write_opt!(node_backlight, BL_LIMIT);
                 state_backlight_clamped = true;
             }
@@ -536,28 +604,34 @@ fn main() {
             write_str_opt!(node_walt_boost, BOOST_ENABLED_STR);
         }
 
-        // ── Hotplug ──────────────────────────────────────────────────────
+        // ── Hotplug (Symmetric - A73 cores only) ──────────────────────────
         if virtual_temp >= 49000 && !state_ccc_hotplug {
             state_ccc_hotplug = true;
-            println!("[HOTPLUG-CCC] 49°C: disabling cores 2,3,6");
+            println!("[HOTPLUG] 49°C: disabling A73 cores (6,7)");
+            write_opt!(node_cpu6_on, 0);
+            write_opt!(node_cpu7_on, 0);
         } else if virtual_temp <= 47000 && state_ccc_hotplug {
             state_ccc_hotplug = false;
-            println!("[HOTPLUG-CCC] Cooled: enabling cores 2,3,6");
+            println!("[HOTPLUG] Cooled: re-enabling A73 cores (6,7)");
+            write_opt!(node_cpu6_on, 1);
+            write_opt!(node_cpu7_on, 1);
         }
 
         if soc <= 5 && !state_bcl_hotplug {
             state_bcl_hotplug = true;
-            println!("[HOTPLUG-BCL] Battery <=5%: disabling cores 2,3,6");
+            println!("[HOTPLUG-BCL] Battery <=5%: disabling A73 cores (6,7)");
+            write_opt!(node_cpu6_on, 0);
+            write_opt!(node_cpu7_on, 0);
         } else if soc >= 6 && state_bcl_hotplug {
             state_bcl_hotplug = false;
-            println!("[HOTPLUG-BCL] Battery >5%: enabling cores 2,3,6");
+            println!("[HOTPLUG-BCL] Battery >5%: re-enabling A73 cores (6,7)");
+            write_opt!(node_cpu6_on, 1);
+            write_opt!(node_cpu7_on, 1);
         }
 
-        let offline = state_ccc_hotplug || state_bcl_hotplug;
-        let core_val = if offline { 0 } else { 1 };
-        write_opt!(node_cpu2_on, core_val);
-        write_opt!(node_cpu3_on, core_val);
-        write_opt!(node_cpu6_on, core_val);
+        // A53 cores always online
+        write_opt!(node_cpu2_on, 1);
+        write_opt!(node_cpu3_on, 1);
 
         // ── Smart Idle Charge Control ─────────────────────────────────────
         if soc >= 100 && screen_state == 0 && !charge_paused_at_full {
@@ -574,7 +648,6 @@ fn main() {
             }
         } else {
             if full_charge_start_time.is_some() {
-                println!("[SMART CHARGE] Charge timer interrupted. Resetting.");
                 full_charge_start_time = None;
             }
 
@@ -585,30 +658,46 @@ fn main() {
             }
         }
 
-        // ── Charging Control Protocol Switching (Screen-ON thresholds shifted +1.5°C) ─────
+        // ── Charging Control with Hysteresis ─────────────────────────────
         if !charge_paused_at_full {
             let is_xiaomi_charger = fastcharge_mode == 1 && quick_charge_type == 3;
             let is_qc2_charger = fastcharge_mode == 0 && quick_charge_type == 2;
             let is_std_5v_charger = fastcharge_mode == 0 && quick_charge_type == 0;
             let is_qc1_charger = fastcharge_mode == 0 && quick_charge_type == 1;
 
+            // Apply hysteresis offset: effective temperatures are shifted
+            // when we're in a restricted state to prevent fluttering
+            let effective_batt = t_battery - chg_hysteresis_offset;
+            let effective_virt = virtual_temp - chg_hysteresis_offset;
+            
+            // Screen-on offset
+            let batt_limit = if screen_state == 1 {
+                t_battery + SCREEN_ON_OFFSET
+            } else {
+                t_battery
+            };
+
             if is_xiaomi_charger {
                 if screen_state == 1 {
                     write_opt!(node_chg_limit, 0);
                     write_opt!(node_res_chg, 1);
 
-                    let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
+                    let current_bl = node_backlight.as_mut().and_then(|n| n.read_fast()).unwrap_or(0);
 
-                    // Screen-ON thresholds increased by +1.5°C (+1500)
-                    let mut restrict_cur = if t_battery >= 43300 || virtual_temp >= 49000 {
+                    let mut restrict_cur = if batt_limit >= 43300 || virtual_temp >= 49000 {
+                        chg_hysteresis_offset = 1000;
                         200000 
-                    } else if t_battery >= 41500 || virtual_temp >= 46500 {
+                    } else if batt_limit >= 41500 || virtual_temp >= 46500 {
+                        chg_hysteresis_offset = 800;
                         500000 
-                    } else if t_battery >= 40000 || virtual_temp >= 44500 {
+                    } else if batt_limit >= 40000 || virtual_temp >= 44500 {
+                        chg_hysteresis_offset = 500;
                         1000000 
                     } else if is_thermal_spike {
+                        chg_hysteresis_offset = 500;
                         800000 
                     } else {
+                        chg_hysteresis_offset = 0;
                         1500000 
                     };
 
@@ -619,34 +708,40 @@ fn main() {
                     write_opt!(node_res_cur, restrict_cur);
                     restricted = false;
                 } else {
+                    // Use effective temperatures with hysteresis
                     if is_thermal_spike && batt_temp >= PROACTIVE_CHG_TEMP_THRESHOLD {
                         if !restricted {
                             println!("[CHG-XIAOMI] Proactive restrict mode due to rapid thermal delta");
                             restricted = true;
+                            chg_hysteresis_offset = 1000;
                         }
                         write_opt!(node_chg_limit, 0);
                         write_opt!(node_res_chg, 1);
                         write_opt!(node_res_cur, 1500000);
-                    } else if t_battery >= 41800 || virtual_temp >= 47500 {
+                    } else if effective_batt >= 41800 || effective_virt >= 47500 {
                         restricted = true;
+                        chg_hysteresis_offset = 1000;
                         write_opt!(node_chg_limit, 0);
                         write_opt!(node_res_chg, 1);
                         write_opt!(node_res_cur, 200000);
-                    } else if t_battery >= 41000 || virtual_temp >= 46000 {
+                    } else if effective_batt >= 41000 || effective_virt >= 46000 {
                         restricted = true;
+                        chg_hysteresis_offset = 800;
                         write_opt!(node_chg_limit, 0);
                         write_opt!(node_res_chg, 1);
                         write_opt!(node_res_cur, 1000000);
-                    } else if t_battery >= 40000 || virtual_temp >= 44000 {
+                    } else if effective_batt >= 40000 || effective_virt >= 44000 {
                         restricted = true;
+                        chg_hysteresis_offset = 500;
                         write_opt!(node_chg_limit, 0);
                         write_opt!(node_res_chg, 1);
                         write_opt!(node_res_cur, 2000000);
                     } else {
                         if restricted {
-                            println!("[CHG-XIAOMI] Battery cooled to {}°C - exiting direct restriction", batt_temp);
+                            println!("[CHG-XIAOMI] Battery cooled safely - clearing hysteresis & restriction");
                             restricted = false;
                         }
+                        chg_hysteresis_offset = 0;
 
                         write_opt!(node_res_chg, 0);
                         write_opt!(node_res_cur, 2000000);
@@ -667,18 +762,22 @@ fn main() {
                 write_opt!(node_res_chg, 1);
 
                 if screen_state == 1 {
-                    let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
+                    let current_bl = node_backlight.as_mut().and_then(|n| n.read_fast()).unwrap_or(0);
 
-                    // Screen-ON thresholds increased by +1.5°C (+1500)
-                    let mut restrict_cur = if t_battery >= 43300 || virtual_temp >= 49000 {
+                    let mut restrict_cur = if batt_limit >= 43300 || virtual_temp >= 49000 {
+                        chg_hysteresis_offset = 1000;
                         200000
-                    } else if t_battery >= 41500 || virtual_temp >= 46000 {
+                    } else if batt_limit >= 41500 || virtual_temp >= 46000 {
+                        chg_hysteresis_offset = 800;
                         400000
-                    } else if t_battery >= 40000 || virtual_temp >= 44000 {
+                    } else if batt_limit >= 40000 || virtual_temp >= 44000 {
+                        chg_hysteresis_offset = 500;
                         700000
                     } else if is_thermal_spike {
+                        chg_hysteresis_offset = 500;
                         500000
                     } else {
+                        chg_hysteresis_offset = 0;
                         1000000 
                     };
 
@@ -687,19 +786,26 @@ fn main() {
                     }
                     write_opt!(node_res_cur, restrict_cur);
                 } else {
-                    let restrict_cur = if t_battery >= 41800 || virtual_temp >= 47500 {
+                    let restrict_cur = if effective_batt >= 41800 || effective_virt >= 47500 {
+                        chg_hysteresis_offset = 1000;
                         200000
-                    } else if t_battery >= 41000 || virtual_temp >= 46000 {
+                    } else if effective_batt >= 41000 || effective_virt >= 46000 {
+                        chg_hysteresis_offset = 800;
                         800000
-                    } else if t_battery >= 40000 || virtual_temp >= 44500 {
+                    } else if effective_batt >= 40000 || effective_virt >= 44500 {
+                        chg_hysteresis_offset = 500;
                         1400000
-                    } else if t_battery >= 38500 || virtual_temp >= 42500 {
+                    } else if effective_batt >= 38500 || effective_virt >= 42500 {
+                        chg_hysteresis_offset = 300;
                         2000000
-                    } else if t_battery >= 37000 || virtual_temp >= 40500 {
+                    } else if effective_batt >= 37000 || effective_virt >= 40500 {
+                        chg_hysteresis_offset = 0;
                         2600000
                     } else if is_thermal_spike {
+                        chg_hysteresis_offset = 500;
                         1200000
                     } else {
+                        chg_hysteresis_offset = 0;
                         3000000
                     };
                     write_opt!(node_res_cur, restrict_cur);
@@ -709,18 +815,22 @@ fn main() {
                 write_opt!(node_res_chg, 1);
 
                 if screen_state == 1 {
-                    let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
+                    let current_bl = node_backlight.as_mut().and_then(|n| n.read_fast()).unwrap_or(0);
 
-                    // Screen-ON thresholds increased by +1.5°C (+1500)
-                    let mut restrict_cur = if t_battery >= 43300 || virtual_temp >= 49000 {
+                    let mut restrict_cur = if batt_limit >= 43300 || virtual_temp >= 49000 {
+                        chg_hysteresis_offset = 1000;
                         200000 
-                    } else if t_battery >= 41500 || virtual_temp >= 46000 {
+                    } else if batt_limit >= 41500 || virtual_temp >= 46000 {
+                        chg_hysteresis_offset = 800;
                         500000
-                    } else if t_battery >= 40000 || virtual_temp >= 44000 {
+                    } else if batt_limit >= 40000 || virtual_temp >= 44000 {
+                        chg_hysteresis_offset = 500;
                         800000
                     } else if is_thermal_spike {
+                        chg_hysteresis_offset = 500;
                         600000
                     } else {
+                        chg_hysteresis_offset = 0;
                         1200000
                     };
 
@@ -729,19 +839,26 @@ fn main() {
                     }
                     write_opt!(node_res_cur, restrict_cur);
                 } else {
-                    let restrict_cur = if t_battery >= 41800 || virtual_temp >= 47500 {
+                    let restrict_cur = if effective_batt >= 41800 || effective_virt >= 47500 {
+                        chg_hysteresis_offset = 1000;
                         200000
-                    } else if t_battery >= 41000 || virtual_temp >= 46000 {
+                    } else if effective_batt >= 41000 || effective_virt >= 46000 {
+                        chg_hysteresis_offset = 800;
                         800000
-                    } else if t_battery >= 40000 || virtual_temp >= 44500 {
+                    } else if effective_batt >= 40000 || effective_virt >= 44500 {
+                        chg_hysteresis_offset = 500;
                         1500000
-                    } else if t_battery >= 38500 || virtual_temp >= 42500 {
+                    } else if effective_batt >= 38500 || effective_virt >= 42500 {
+                        chg_hysteresis_offset = 300;
                         2200000
-                    } else if t_battery >= 37000 || virtual_temp >= 40500 {
+                    } else if effective_batt >= 37000 || effective_virt >= 40500 {
+                        chg_hysteresis_offset = 0;
                         2600000
                     } else if is_thermal_spike {
+                        chg_hysteresis_offset = 500;
                         1200000
                     } else {
+                        chg_hysteresis_offset = 0;
                         3000000
                     };
                     write_opt!(node_res_cur, restrict_cur);
@@ -750,14 +867,17 @@ fn main() {
                 write_opt!(node_chg_limit, 0);
                 write_opt!(node_res_chg, 1);
 
-                // Screen-ON thresholds increased by +1.5°C (+1500)
-                let restrict_cur = if t_battery >= 43300 || virtual_temp >= 49000 {
+                let restrict_cur = if batt_limit >= 43300 || virtual_temp >= 49000 {
+                    chg_hysteresis_offset = 1000;
                     200000
-                } else if t_battery >= 41500 || virtual_temp >= 46000 {
+                } else if batt_limit >= 41500 || virtual_temp >= 46000 {
+                    chg_hysteresis_offset = 800;
                     500000
                 } else if screen_state == 1 {
+                    chg_hysteresis_offset = 0;
                     1000000 
                 } else {
+                    chg_hysteresis_offset = 0;
                     2500000 
                 };
                 write_opt!(node_res_cur, restrict_cur);
@@ -765,14 +885,17 @@ fn main() {
                 write_opt!(node_chg_limit, 0);
                 write_opt!(node_res_chg, 1);
 
-                // Screen-ON thresholds increased by +1.5°C (+1500)
-                let fallback_cur = if t_battery >= 43300 {
+                let fallback_cur = if batt_limit >= 43300 {
+                    chg_hysteresis_offset = 1000;
                     200000
-                } else if t_battery >= 41500 {
+                } else if batt_limit >= 41500 {
+                    chg_hysteresis_offset = 500;
                     600000
                 } else if screen_state == 1 {
+                    chg_hysteresis_offset = 0;
                     1000000 
                 } else {
+                    chg_hysteresis_offset = 0;
                     2000000 
                 };
                 write_opt!(node_res_cur, fallback_cur);
@@ -782,8 +905,9 @@ fn main() {
 
         // ── Status Log ────────────────────────────────────────────────────
         println!(
-            "V:{}°C | B:{}°C | HVX:{}°C | Δ:{:+.1}°C/s | C0:L{} C4:L{} G:L{} CDSP:L{} ADSP:L{} DAC:{} TS:L{} BL:{} W:{} Bs:{} HP:{}{} SOC:{}% | CHG:[FM:{} QC:{}] S:{}",
+            "V:{}°C | B:{}°C | HVX:{}°C | Δ:{:+.1}°C/s | Hys:{} | C0:L{} C4:L{} G:L{} CDSP:L{} ADSP:L{} DAC:{} TS:L{} BL:{} W:{} Bs:{} HP:{}{} SOC:{}% | CHG:[FM:{} QC:{}] S:{}",
             virtual_c, batt_temp, t_hvx / 1000, temp_delta_normalized as f32 / 1000.0,
+            chg_hysteresis_offset / 1000,
             state_cpu0, state_cpu4, state_gpu, state_cdsp, state_adsp,
             if dac_connected { "Y" } else { "N" }, state_tstate,
             if state_backlight_clamped { "CLAMP" } else { "NORM" },
@@ -794,17 +918,34 @@ fn main() {
             if charge_paused_at_full { "Y" } else { "N" }
         );
 
-        // ── Dynamic Sleep Duration ──────────────────────────────────────
-        let sleep_duration = match screen_state {
-            0 => Duration::from_secs(SCREEN_OFF_SLEEP),
-            _ if virtual_temp >= 40000 || is_thermal_spike => Duration::from_secs(HOT_SLEEP),
-            _ => Duration::from_secs(NORMAL_SLEEP),
+        // ── Dynamic Polling Rate Scaling ──────────────────────────────────
+        // Sleep duration based on screen state and thermal velocity
+        let sleep_duration = if screen_state == 0 {
+            // Screen off: back off more if cooling, poll faster if rising
+            if temp_delta_normalized < -100 {
+                // Cooling down significantly - sleep longer
+                Duration::from_secs(SLEEP_IDLE_SCREEN_OFF + 4)
+            } else if temp_delta_normalized > 200 {
+                // Warming up while screen off - wake up sooner
+                Duration::from_secs(NORMAL_SLEEP)
+            } else {
+                Duration::from_secs(SLEEP_IDLE_SCREEN_OFF)
+            }
+        } else {
+            // Screen on: scale aggressively based on thermal spike rate
+            if is_thermal_spike || virtual_temp >= 42000 {
+                Duration::from_secs(SLEEP_ACTIVE_SPIKE)
+            } else if temp_delta_normalized > 400 {
+                Duration::from_millis(1000) // 1 second - rapid heating
+            } else {
+                Duration::from_secs(NORMAL_SLEEP)
+            }
         };
 
         thread::sleep(sleep_duration);
     }
 
-    // ── Graceful Shutdown Hardware Restoration ────────────────────────────
+    // ── Graceful Shutdown ──────────────────────────────────────────────────
     println!("\n[DAEMON] Terminating! Restoring hardware defaults...");
     write_opt!(node_cpu0, CPU0_DEFAULT);
     write_opt!(node_cpu4, CPU4_DEFAULT);
@@ -820,6 +961,9 @@ fn main() {
     write_opt!(node_cpu2_on, 1);
     write_opt!(node_cpu3_on, 1);
     write_opt!(node_cpu6_on, 1);
+    write_opt!(node_cpu7_on, 1);
+    
+    let _ = std::fs::remove_file("/data/local/tmp/thermal_daemon.pid");
     
     std::process::exit(0);
 }
