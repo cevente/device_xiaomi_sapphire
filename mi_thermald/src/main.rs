@@ -9,6 +9,8 @@
 #![allow(clippy::collapsible_else_if)]
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
+#![allow(dead_code)]
+#![allow(clippy::too_many_arguments)]
 
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -114,7 +116,6 @@ const BOOST_DISABLED_STR: &str = "0 0 0 0 0 0 0 0";
 // ── Predictive control constants ──────────────────────────────────────────
 const THERMAL_SPIKE_THRESHOLD_NORMALIZED: i32 = 750;
 const PROACTIVE_CPU_TEMP_BOOST: i32 = 3000;
-const PROACTIVE_BOOST_TEMP_THRESHOLD: i32 = 34500;
 const PROACTIVE_CHG_TEMP_THRESHOLD: i32 = 38500;
 
 // ── Sleep duration constants ──────────────────────────────────────────────
@@ -227,19 +228,13 @@ macro_rules! read_sensor_safe {
     };
 }
 
-// ── Simple state logging (no timestamp, no dependencies) ──────────────────
+// ── Simple state logging (just like your original println!) ──────────────
 fn log_thermal_state(virtual_temp: i32, battery_temp: i32, soc: i32, current_limit: i32, 
-                     usb_online: i32, screen_state: i32, state_cpu0: usize, state_cpu4: usize,
-                     state_gpu: usize, state_cdsp: i32, state_adsp: i32) {
+                     usb_online: i32, screen_state: i32) {
     let line = format!(
-        "V:{}°C B:{}°C C0:L{} C4:L{} G:L{} CDSP:L{} ADSP:L{} CHG:{}mA SOC:{}% USB:{} SCREEN:{}\n",
+        "V:{}°C B:{}°C CHG:{}mA SOC:{}% USB:{} SCREEN:{}\n",
         virtual_temp / 1000,
         battery_temp / 1000,
-        state_cpu0,
-        state_cpu4,
-        state_gpu,
-        state_cdsp,
-        state_adsp,
         current_limit,
         soc,
         usb_online,
@@ -844,14 +839,13 @@ fn main() {
         }
         prev_screen_state = screen_state;
 
-        // ── Thermal State Logging (once per minute, no timestamp) ────────
+        // ── Thermal State Logging (once per minute) ──────────────────────
         if now.duration_since(last_log).as_secs() >= 60 {
             let current_limit = node_res_cur.as_mut().and_then(|n| n.read()).unwrap_or(0);
             log_thermal_state(
                 virtual_temp, t_battery, soc, 
                 current_limit,
-                usb_online, screen_state, state_cpu0, state_cpu4,
-                state_gpu, state_cdsp, state_adsp
+                usb_online, screen_state
             );
             last_log = now;
         }
