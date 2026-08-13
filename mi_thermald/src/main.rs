@@ -73,15 +73,17 @@ const CPU0_CLR: [i32; 4] = [32000, 35000, 38000, 41000];
 const CPU0_TARGET: [i32; 4] = [1804800, 1516800, 1190400, 691200];
 const CPU0_DEFAULT: i32 = 1900800;
 
+// CPU4 limits tightened specifically to control 37°C idle loads
 const CPU4_TRIG: [i32; 6] = [34000, 36000, 38000, 41000, 43500, 45500];
 const CPU4_CLR: [i32; 6] = [32000, 34000, 36000, 39000, 41500, 44500];
-const CPU4_TARGET: [i32; 6] = [2400000, 2208000, 1900800, 1516800, 1113600, 806400];
+const CPU4_TARGET: [i32; 6] = [2208000, 1900800, 1516800, 1113600, 806400, 806400];
 const CPU4_DEFAULT: i32 = 2803200;
 
-const GPU_TRIG: [i32; 3] = [43000, 45000, 46000];
-const GPU_CLR: [i32; 3] = [41000, 43000, 45000];
+// GPU arrays expanded to 4 stages to catch the 35°C lower-end curve
+const GPU_TRIG: [i32; 4] = [35000, 43000, 45000, 46000];
+const GPU_CLR: [i32; 4] = [33000, 41000, 43000, 45000];
 const GPU_FREQS: [i32; 7] = [1260000000, 1114800000, 1025000000, 785000000, 600000000, 465000000, 320000000];
-const GPU_TARGET_INDICES: [usize; 3] = [2, 4, 5];
+const GPU_TARGET_INDICES: [usize; 4] = [3, 2, 4, 5];
 
 const TSTATE_TRIG: [i32; 4] = [46000, 48000, 51000, 53000];
 const TSTATE_CLR: [i32; 4] = [44000, 46000, 50000, 51000];
@@ -273,6 +275,7 @@ fn main() {
     let mut state_cpu0: usize = 0;
     let mut state_cpu4: usize = 0;
     let mut state_gpu: usize = 0;
+    let mut applied_gpu_freq: i32 = GPU_FREQS[0]; // Tracks actual hardware frequency for screen states
     let mut state_tstate: usize = 0;
     let mut state_backlight_clamped: bool = false;
     let mut state_wifi: i32 = 0;
@@ -403,30 +406,49 @@ fn main() {
 
         // ── GPU ───────────────────────────────────────────────────────────
         let mut new_gpu = state_gpu;
-        for i in (0..3).rev() {
+        for i in (0..4).rev() { 
             if virtual_temp >= GPU_TRIG[i] && state_gpu <= i {
                 new_gpu = i + 1;
                 break;
             }
         }
         if new_gpu <= state_gpu {
-            for i in 0..3 {
+            for i in 0..4 { 
                 if virtual_temp <= GPU_CLR[i] && state_gpu > i {
                     new_gpu = i;
                     break;
                 }
             }
         }
-        if new_gpu != state_gpu {
-            state_gpu = new_gpu;
-            if state_gpu == 0 {
-                println!("[GPU] Restored to {}Hz", GPU_FREQS[0]);
-                write_opt!(node_gpu, GPU_FREQS[0]);
+
+        // 1. Update the thermal tier tracker
+        state_gpu = new_gpu;
+
+        // 2. Determine the frequency dictated purely by thermals
+        let thermal_freq = if state_gpu == 0 {
+            GPU_FREQS[0]
+        } else {
+            GPU_FREQS[GPU_TARGET_INDICES[state_gpu - 1]]
+        };
+
+        // 3. Apply the Screen-ON hardware clamp (785 MHz / Index 3)
+        let target_freq = if screen_state == 1 {
+            thermal_freq.min(785000000)
+        } else {
+            thermal_freq
+        };
+
+        // 4. Write to the node ONLY if the target frequency changed
+        if target_freq != applied_gpu_freq {
+            applied_gpu_freq = target_freq;
+            
+            if screen_state == 1 && target_freq == 785000000 && state_gpu == 0 {
+                println!("[GPU] Screen ON: Clamping to {}Hz", target_freq);
             } else {
-                let freq = GPU_FREQS[GPU_TARGET_INDICES[state_gpu - 1]];
-                println!("[GPU] Throttled L{} -> {}Hz", state_gpu, freq);
-                write_opt!(node_gpu, freq);
+                println!("[GPU] Thermal L{} -> {}Hz (Screen: {})", state_gpu, target_freq, screen_state);
             }
+            
+            write_opt!(node_gpu, target_freq);
         }
 
         // ── ADSP (Audio) Control ──────────────────────────────────────
