@@ -27,7 +27,7 @@ const TZ_EMMC: &str = "/sys/class/thermal/thermal_zone21/temp";
 const TZ_BATTERY: &str = "/sys/class/thermal/thermal_zone34/temp";
 const BAT_SOC_PATH: &str = "/sys/class/power_supply/battery/capacity";
 const SCREEN_STATE_NODE: &str = "/sys/class/thermal/thermal_message/screen_state";
-const USB_ONLINE_NODE: &str = "/sys/class/power_supply/usb/online";
+const USB_ONLINE_NODE: &str = "/sys/class/power_supply/usb/online";  // read for logging only
 
 // ── Thermal control paths ───────────────────────────────────────────────────
 const CPU0_MAX_FREQ: &str = "/sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq";
@@ -180,7 +180,7 @@ impl SysfsNode {
         let bytes = s.as_bytes();
         let len = bytes.len().min(buf.len());
         buf[..len].copy_from_slice(&bytes[..len]);
-        
+
         if let Err(e) = self.file.write_all(&buf[..len]) {
             eprintln!("Failed to write {} to {}: {}", value, self.path, e);
         }
@@ -228,8 +228,8 @@ macro_rules! read_sensor_safe {
     };
 }
 
-// ── Simple state logging (just like your original println!) ──────────────
-fn log_thermal_state(virtual_temp: i32, battery_temp: i32, soc: i32, current_limit: i32, 
+// ── Simple state logging ──────────────────────────────────────────────────
+fn log_thermal_state(virtual_temp: i32, battery_temp: i32, soc: i32, current_limit: i32,
                      usb_online: i32, screen_state: i32) {
     let line = format!(
         "V:{}°C B:{}°C CHG:{}mA SOC:{}% USB:{} SCREEN:{}\n",
@@ -240,7 +240,7 @@ fn log_thermal_state(virtual_temp: i32, battery_temp: i32, soc: i32, current_lim
         usb_online,
         screen_state
     );
-    
+
     let _ = OpenOptions::new()
         .append(true)
         .create(true)
@@ -352,7 +352,7 @@ fn main() {
         let t_emmc = read_sensor_safe!(node_t_emmc, last_t_emmc);
         let t_battery = read_sensor_safe!(node_t_battery, last_t_battery);
         let t_hvx = read_sensor_safe!(node_t_hvx, last_t_hvx);
-        
+
         let soc = node_soc.as_mut().and_then(|n| n.read()).unwrap_or(100);
         let screen_state = node_screen.as_mut().and_then(|n| n.read()).unwrap_or(0);
         let usb_online = node_usb_online.as_mut().and_then(|n| n.read()).unwrap_or(0);
@@ -363,15 +363,14 @@ fn main() {
         let quick_charge_type = node_quick_charge_type.as_mut().and_then(|n| n.read()).unwrap_or(-1);
 
         // ── Virtual temperature (OEM-CORRECTED WEIGHTS) ──────────────────
-        // Using the exact weights from the original mi_thermald config
         let virtual_temp = (WEIGHT_QUIET * t_quiet
-            + WEIGHT_PA * t_pa          // Negative! PA is a localized hotspot
-            + WEIGHT_CHARGE * t_charge  // Negative! Charge IC is localized
+            + WEIGHT_PA * t_pa
+            + WEIGHT_CHARGE * t_charge
             + WEIGHT_EMMC * t_emmc
             + WEIGHT_BATTERY * t_battery)
             / WEIGHT_SUM
             + COMPENSATION;
-            
+
         let virtual_c = virtual_temp / 1000;
         let batt_temp = t_battery / 1000;
 
@@ -396,7 +395,8 @@ fn main() {
         prev_virtual_temp = Some(virtual_temp);
 
         if is_thermal_spike {
-            println!("[PROACTIVE] Rapid thermal rise detected! Rate: +{:.1}°C/s", temp_delta_normalized as f32 / 1000.0);
+            println!("[PROACTIVE] Rapid thermal rise detected! Rate: +{:.1}°C/s",
+                     temp_delta_normalized as f32 / 1000.0);
         }
 
         let virtual_temp_for_cpu = if is_thermal_spike && virtual_temp >= 35000 {
@@ -573,9 +573,9 @@ fn main() {
         }
 
         // ── WALT Input Boost (OEM thresholds) ──────────────────────────────
-        let should_disable_boost = (virtual_temp >= BOOST_TRIG) || 
+        let should_disable_boost = (virtual_temp >= BOOST_TRIG) ||
                                    (virtual_temp >= 35000 && is_thermal_spike);
-        
+
         if should_disable_boost && state_boost == 1 {
             state_boost = 0;
             println!("[BOOST] Proactive Disable (Thermal cap reached)");
@@ -638,14 +638,8 @@ fn main() {
         }
 
         // ── Charging Control Protocol Switching ─────────────────────────────
-        // Check if USB is actually connected before attempting to charge
-        if usb_online == 0 {
-            // No charger connected - don't try to charge
-            write_opt!(node_res_chg, 0);
-            write_opt!(node_res_cur, 0);
-            write_opt!(node_chg_limit, 0);
-            write_opt!(node_input_suspend, 1);
-        } else if !charge_paused_at_full {
+        // No USB check – assume charger is connected if we have a charger type.
+        if !charge_paused_at_full {
             let is_xiaomi_charger = fastcharge_mode == 1 && quick_charge_type == 3;
             let is_qc2_charger = fastcharge_mode == 0 && quick_charge_type == 2;
             let is_std_5v_charger = fastcharge_mode == 0 && quick_charge_type == 0;
@@ -658,17 +652,16 @@ fn main() {
 
                     let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
 
-                    // Screen-ON thresholds increased by +1.5°C (+1500)
                     let mut restrict_cur = if t_battery >= 43300 || virtual_temp >= 49000 {
-                        200000 
+                        200000
                     } else if t_battery >= 41500 || virtual_temp >= 46500 {
-                        500000 
+                        500000
                     } else if t_battery >= 40000 || virtual_temp >= 44500 {
-                        1000000 
+                        1000000
                     } else if is_thermal_spike {
-                        800000 
+                        800000
                     } else {
-                        1500000 
+                        1500000
                     };
 
                     if current_bl > BL_LIMIT && restrict_cur > 500000 {
@@ -703,7 +696,8 @@ fn main() {
                         write_opt!(node_res_cur, 2000000);
                     } else {
                         if restricted {
-                            println!("[CHG-XIAOMI] Battery cooled to {}°C - exiting direct restriction", batt_temp);
+                            println!("[CHG-XIAOMI] Battery cooled to {}°C - exiting direct restriction",
+                                     batt_temp);
                             restricted = false;
                         }
 
@@ -728,7 +722,6 @@ fn main() {
                 if screen_state == 1 {
                     let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
 
-                    // Screen-ON thresholds increased by +1.5°C (+1500)
                     let mut restrict_cur = if t_battery >= 43300 || virtual_temp >= 49000 {
                         200000
                     } else if t_battery >= 41500 || virtual_temp >= 46000 {
@@ -738,7 +731,7 @@ fn main() {
                     } else if is_thermal_spike {
                         500000
                     } else {
-                        1000000 
+                        1000000
                     };
 
                     if current_bl > BL_LIMIT && restrict_cur > 400000 {
@@ -770,9 +763,8 @@ fn main() {
                 if screen_state == 1 {
                     let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
 
-                    // Screen-ON thresholds increased by +1.5°C (+1500)
                     let mut restrict_cur = if t_battery >= 43300 || virtual_temp >= 49000 {
-                        200000 
+                        200000
                     } else if t_battery >= 41500 || virtual_temp >= 46000 {
                         500000
                     } else if t_battery >= 40000 || virtual_temp >= 44000 {
@@ -809,30 +801,28 @@ fn main() {
                 write_opt!(node_chg_limit, 0);
                 write_opt!(node_res_chg, 1);
 
-                // Screen-ON thresholds increased by +1.5°C (+1500)
                 let restrict_cur = if t_battery >= 43300 || virtual_temp >= 49000 {
                     200000
                 } else if t_battery >= 41500 || virtual_temp >= 46000 {
                     500000
                 } else if screen_state == 1 {
-                    1000000 
+                    1000000
                 } else {
-                    2500000 
+                    2500000
                 };
                 write_opt!(node_res_cur, restrict_cur);
             } else {
                 write_opt!(node_chg_limit, 0);
                 write_opt!(node_res_chg, 1);
 
-                // Screen-ON thresholds increased by +1.5°C (+1500)
                 let fallback_cur = if t_battery >= 43300 {
                     200000
                 } else if t_battery >= 41500 {
                     600000
                 } else if screen_state == 1 {
-                    1000000 
+                    1000000
                 } else {
-                    2000000 
+                    2000000
                 };
                 write_opt!(node_res_cur, fallback_cur);
             }
@@ -843,7 +833,7 @@ fn main() {
         if now.duration_since(last_log).as_secs() >= 60 {
             let current_limit = node_res_cur.as_mut().and_then(|n| n.read()).unwrap_or(0);
             log_thermal_state(
-                virtual_temp, t_battery, soc, 
+                virtual_temp, t_battery, soc,
                 current_limit,
                 usb_online, screen_state
             );
@@ -891,6 +881,6 @@ fn main() {
     write_opt!(node_cpu2_on, 1);
     write_opt!(node_cpu3_on, 1);
     write_opt!(node_cpu6_on, 1);
-    
+
     std::process::exit(0);
 }
