@@ -4,6 +4,7 @@
 //! - Increased Screen-ON charging thermal thresholds by an additional +1.5°C for higher active current retention.
 //! - Dynamic polling rate scaling based on thermal velocity.
 //! - Charging current hysteresis protection to prevent fluttering.
+//! - 1D Discrete Kalman Filter for sensor noise reduction.
 
 #![allow(missing_docs)]
 #![allow(clippy::needless_range_loop)]
@@ -107,6 +108,10 @@ const SLEEP_IDLE_SCREEN_OFF: u64 = 12;
 const SLEEP_NORMAL: u64 = 3;
 const SLEEP_ACTIVE_SPIKE: u64 = 1;
 
+// ── Kalman Filter constants ───────────────────────────────────────────────
+const KALMAN_Q: f64 = 0.01;  // Process noise - very low, trust the physics model
+const KALMAN_R: f64 = 2.0;   // Measurement noise - moderate sensor jitter
+
 // ── Signal handling ────────────────────────────────────────────────────────
 static RUNNING: AtomicBool = AtomicBool::new(true);
 
@@ -119,6 +124,40 @@ extern "C" fn handle_sig(_sig: i32) {
 
 extern "C" {
     fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
+}
+
+// ── Kalman Filter ──────────────────────────────────────────────────────────
+struct KalmanFilter {
+    x: f64,      // Estimated true temperature (state)
+    p: f64,      // Estimation error covariance
+    q: f64,      // Process noise covariance (trust in physics model)
+    r: f64,      // Measurement noise covariance (trust in sensor accuracy)
+}
+
+impl KalmanFilter {
+    fn new(initial_val: f64, q: f64, r: f64) -> Self {
+        Self {
+            x: initial_val,
+            p: 1.0,
+            q,
+            r,
+        }
+    }
+
+    #[inline(always)]
+    fn update(&mut self, measurement: f64) -> f64 {
+        // 1. Prediction Step (Time Update)
+        // Assuming constant state model: x_pred = x
+        let x_pred = self.x;
+        let p_pred = self.p + self.q;
+
+        // 2. Correction Step (Measurement Update)
+        let k = p_pred / (p_pred + self.r);  // Kalman Gain
+        self.x = x_pred + k * (measurement - x_pred);
+        self.p = (1.0 - k) * p_pred;
+
+        self.x
+    }
 }
 
 // ── DAC Detector with caching ─────────────────────────────────────────────
@@ -176,6 +215,7 @@ impl SysfsNode {
         self.read_buf.trim().parse().ok()
     }
 
+    #[inline(always)]
     fn read_fast(&mut self) -> Option<i32> {
         self.file.seek(SeekFrom::Start(0)).ok()?;
         
@@ -269,7 +309,7 @@ macro_rules! read_sensor_safe {
 fn main() {
     println!("============================================================");
     println!(" Unified Thermal & Charging Daemon (Rust)");
-    println!(" ML-Optimized weights | Proactive Rate-of-Change Control");
+    println!(" ML-Optimized weights | 1D Kalman Filter (Q={:.2}, R={:.1})", KALMAN_Q, KALMAN_R);
     println!(" Dynamic Polling Rate Scaling | Charging Hysteresis");
     println!(" Audio-Aware CPU Floor | Graceful Restoration");
     println!("============================================================");
@@ -333,6 +373,10 @@ fn main() {
     write_str_opt!(node_walt_ms, "40");
     write_str_opt!(node_walt_boost, BOOST_ENABLED_STR);
 
+    // ── Kalman Filter initialization ─────────────────────────────────────
+    // Start at 45°C (safe fallback), Q=0.01 (low process noise), R=2.0 (moderate sensor jitter)
+    let mut virtual_temp_kf = KalmanFilter::new(45000.0, KALMAN_Q, KALMAN_R);
+
     // ── State tracking ──────────────────────────────────────────────────
     let mut prev_virtual_temp: Option<i32> = None;
     let mut state_cpu0: usize = 0;
@@ -352,7 +396,7 @@ fn main() {
     let mut state_adsp: i32 = 0;
     let mut last_update = Instant::now();
     let mut dac_detector = DacDetector::new();
-    let mut chg_hysteresis_offset: i32 = 0;  // Charging hysteresis state
+    let mut chg_hysteresis_offset: i32 = 0;
 
     // ── Sensor fallbacks (start HIGH for safe defaults) ─────────────────
     let mut last_t_pa = 45000;
@@ -379,18 +423,21 @@ fn main() {
         let fastcharge_mode = node_fastcharge_mode.as_mut().and_then(|n| n.read_fast()).unwrap_or(-1);
         let quick_charge_type = node_quick_charge_type.as_mut().and_then(|n| n.read_fast()).unwrap_or(-1);
 
-        // ── Virtual temperature ──────────────────────────────────────────
-        let virtual_temp = (WEIGHT_QUIET * t_quiet
+        // ── Raw Virtual temperature ──────────────────────────────────────
+        let raw_virtual_temp = (WEIGHT_QUIET * t_quiet
             + WEIGHT_PA * t_pa
             + WEIGHT_CHARGE * t_charge
             + WEIGHT_EMMC * t_emmc
             + WEIGHT_BATTERY * t_battery)
             / WEIGHT_SUM
             + COMPENSATION;
+
+        // ── Apply Kalman Filter to smooth sensor noise ──────────────────
+        let virtual_temp = virtual_temp_kf.update(raw_virtual_temp as f64) as i32;
         let virtual_c = virtual_temp / 1000;
         let batt_temp = t_battery / 1000;
 
-        // ── Thermal derivative ──────────────────────────────────────────
+        // ── Thermal derivative using filtered value ─────────────────────
         let now = Instant::now();
         let elapsed_secs = now.duration_since(last_update).as_secs_f64();
         last_update = now;
@@ -905,8 +952,9 @@ fn main() {
 
         // ── Status Log ────────────────────────────────────────────────────
         println!(
-            "V:{}°C | B:{}°C | HVX:{}°C | Δ:{:+.1}°C/s | Hys:{} | C0:L{} C4:L{} G:L{} CDSP:L{} ADSP:L{} DAC:{} TS:L{} BL:{} W:{} Bs:{} HP:{}{} SOC:{}% | CHG:[FM:{} QC:{}] S:{}",
-            virtual_c, batt_temp, t_hvx / 1000, temp_delta_normalized as f32 / 1000.0,
+            "V:{}°C (raw:{}°C) | B:{}°C | HVX:{}°C | Δ:{:+.1}°C/s | Hys:{} | C0:L{} C4:L{} G:L{} CDSP:L{} ADSP:L{} DAC:{} TS:L{} BL:{} W:{} Bs:{} HP:{}{} SOC:{}% | CHG:[FM:{} QC:{}] S:{}",
+            virtual_c, raw_virtual_temp / 1000, batt_temp, t_hvx / 1000, 
+            temp_delta_normalized as f32 / 1000.0,
             chg_hysteresis_offset / 1000,
             state_cpu0, state_cpu4, state_gpu, state_cdsp, state_adsp,
             if dac_connected { "Y" } else { "N" }, state_tstate,
@@ -919,24 +967,19 @@ fn main() {
         );
 
         // ── Dynamic Polling Rate Scaling ──────────────────────────────────
-        // Sleep duration based on screen state and thermal velocity
         let sleep_duration = if screen_state == 0 {
-            // Screen off: back off more if cooling, poll faster if rising
             if temp_delta_normalized < -100 {
-                // Cooling down significantly - sleep longer
                 Duration::from_secs(SLEEP_IDLE_SCREEN_OFF + 4)
             } else if temp_delta_normalized > 200 {
-                // Warming up while screen off - wake up sooner
                 Duration::from_secs(NORMAL_SLEEP)
             } else {
                 Duration::from_secs(SLEEP_IDLE_SCREEN_OFF)
             }
         } else {
-            // Screen on: scale aggressively based on thermal spike rate
             if is_thermal_spike || virtual_temp >= 42000 {
                 Duration::from_secs(SLEEP_ACTIVE_SPIKE)
             } else if temp_delta_normalized > 400 {
-                Duration::from_millis(1000) // 1 second - rapid heating
+                Duration::from_millis(1000)
             } else {
                 Duration::from_secs(NORMAL_SLEEP)
             }
