@@ -5,6 +5,7 @@
 //! - Dynamic polling rate scaling based on thermal velocity.
 //! - Charging current hysteresis protection to prevent fluttering.
 //! - 1D Discrete Kalman Filter for sensor noise reduction.
+//! - 100% Zero-allocation hot loop.
 
 #![allow(missing_docs)]
 #![allow(clippy::needless_range_loop)]
@@ -148,7 +149,6 @@ impl KalmanFilter {
     #[inline(always)]
     fn update(&mut self, measurement: f64) -> f64 {
         // 1. Prediction Step (Time Update)
-        // Assuming constant state model: x_pred = x
         let x_pred = self.x;
         let p_pred = self.p + self.q;
 
@@ -227,21 +227,40 @@ impl SysfsNode {
         if started { Some(val) } else { None }
     }
 
-    fn write(&mut self, value: i32) {
+    #[inline(always)]
+    fn write(&mut self, mut value: i32) {
         if let Err(e) = self.file.seek(SeekFrom::Start(0)) {
             eprintln!("Failed to seek {}: {}", self.path, e);
             return;
         }
         let _ = self.file.set_len(0);
 
-        let mut buf = [0u8; 32];
-        let s = format!("{}\n", value);
-        let bytes = s.as_bytes();
-        let len = bytes.len().min(buf.len());
-        buf[..len].copy_from_slice(&bytes[..len]);
+        // Zero-allocation stack buffer for integer formatting
+        let mut buf = [0u8; 16];
+        let mut i = 15;
+        buf[i] = b'\n'; // Appending newline
         
-        if let Err(e) = self.file.write_all(&buf[..len]) {
-            eprintln!("Failed to write {} to {}: {}", value, self.path, e);
+        if value == 0 {
+            i -= 1;
+            buf[i] = b'0';
+        } else {
+            let is_negative = value < 0;
+            if is_negative {
+                value = -value;
+            }
+            while value > 0 && i > 0 {
+                i -= 1;
+                buf[i] = b'0' + (value % 10) as u8;
+                value /= 10;
+            }
+            if is_negative && i > 0 {
+                i -= 1;
+                buf[i] = b'-';
+            }
+        }
+
+        if let Err(e) = self.file.write_all(&buf[i..]) {
+            eprintln!("Failed to write to {}: {}", self.path, e);
         }
     }
 
@@ -303,14 +322,11 @@ fn main() {
     println!(" Audio-Aware CPU Floor | Graceful Restoration");
     println!("============================================================");
 
-    // SAFETY: signal() is a standard POSIX system call. The signal handlers
-    // only set an atomic flag, which is safe in a signal context.
     unsafe {
         signal(SIGINT, handle_sig);
         signal(SIGTERM, handle_sig);
     }
 
-    // Single instance check
     if let Ok(mut f) = OpenOptions::new()
         .write(true)
         .create(true)
@@ -365,7 +381,6 @@ fn main() {
     write_str_opt!(node_walt_boost, BOOST_ENABLED_STR);
 
     // ── Kalman Filter initialization ─────────────────────────────────────
-    // Start at 45°C (safe fallback), Q=0.01 (low process noise), R=2.0 (moderate sensor jitter)
     let mut virtual_temp_kf = KalmanFilter::new(45000.0, KALMAN_Q, KALMAN_R);
 
     // ── State tracking ──────────────────────────────────────────────────
@@ -389,7 +404,6 @@ fn main() {
     let mut dac_detector = DacDetector::new();
     let mut chg_hysteresis_offset: i32 = 0;
 
-    // ── Sensor fallbacks (start HIGH for safe defaults) ─────────────────
     let mut last_t_pa = 45000;
     let mut last_t_quiet = 45000;
     let mut last_t_charge = 45000;
@@ -399,7 +413,6 @@ fn main() {
 
     // ── Runtime loop ──────────────────────────────────────────────────────
     while RUNNING.load(Ordering::SeqCst) {
-        // ── Read sensors ─────────────────────────────────────────────────
         let t_pa = read_sensor_safe!(node_t_pa, last_t_pa);
         let t_quiet = read_sensor_safe!(node_t_quiet, last_t_quiet);
         let t_charge = read_sensor_safe!(node_t_charge, last_t_charge);
@@ -414,7 +427,6 @@ fn main() {
         let fastcharge_mode = node_fastcharge_mode.as_mut().and_then(|n| n.read_fast()).unwrap_or(-1);
         let quick_charge_type = node_quick_charge_type.as_mut().and_then(|n| n.read_fast()).unwrap_or(-1);
 
-        // ── Raw Virtual temperature ──────────────────────────────────────
         let raw_virtual_temp = (WEIGHT_QUIET * t_quiet
             + WEIGHT_PA * t_pa
             + WEIGHT_CHARGE * t_charge
@@ -423,12 +435,10 @@ fn main() {
             / WEIGHT_SUM
             + COMPENSATION;
 
-        // ── Apply Kalman Filter to smooth sensor noise ──────────────────
         let virtual_temp = virtual_temp_kf.update(raw_virtual_temp as f64) as i32;
         let virtual_c = virtual_temp / 1000;
         let batt_temp = t_battery / 1000;
 
-        // ── Thermal derivative using filtered value ─────────────────────
         let now = Instant::now();
         let elapsed_secs = now.duration_since(last_update).as_secs_f64();
         last_update = now;
@@ -667,7 +677,6 @@ fn main() {
             write_opt!(node_cpu7_on, 1);
         }
 
-        // A53 cores always online
         write_opt!(node_cpu2_on, 1);
         write_opt!(node_cpu3_on, 1);
 
@@ -703,12 +712,9 @@ fn main() {
             let is_std_5v_charger = fastcharge_mode == 0 && quick_charge_type == 0;
             let is_qc1_charger = fastcharge_mode == 0 && quick_charge_type == 1;
 
-            // Apply hysteresis offset: effective temperatures are shifted
-            // when we're in a restricted state to prevent fluttering
             let effective_batt = t_battery - chg_hysteresis_offset;
             let effective_virt = virtual_temp - chg_hysteresis_offset;
             
-            // Screen-on offset
             let batt_limit = if screen_state == 1 {
                 t_battery + SCREEN_ON_OFFSET
             } else {
@@ -746,7 +752,6 @@ fn main() {
                     write_opt!(node_res_cur, restrict_cur);
                     restricted = false;
                 } else {
-                    // Use effective temperatures with hysteresis
                     if is_thermal_spike && batt_temp >= PROACTIVE_CHG_TEMP_THRESHOLD {
                         if !restricted {
                             println!("[CHG-XIAOMI] Proactive restrict mode due to rapid thermal delta");
@@ -941,7 +946,6 @@ fn main() {
         }
         prev_screen_state = screen_state;
 
-        // ── Status Log ────────────────────────────────────────────────────
         println!(
             "V:{}°C (raw:{}°C) | B:{}°C | HVX:{}°C | Δ:{:+.1}°C/s | Hys:{} | C0:L{} C4:L{} G:L{} CDSP:L{} ADSP:L{} DAC:{} TS:L{} BL:{} W:{} Bs:{} HP:{}{} SOC:{}% | CHG:[FM:{} QC:{}] S:{}",
             virtual_c, raw_virtual_temp / 1000, batt_temp, t_hvx / 1000, 
@@ -957,7 +961,6 @@ fn main() {
             if charge_paused_at_full { "Y" } else { "N" }
         );
 
-        // ── Dynamic Polling Rate Scaling ──────────────────────────────────
         let sleep_duration = if screen_state == 0 {
             if temp_delta_normalized < -100 {
                 Duration::from_secs(SLEEP_IDLE_SCREEN_OFF + 4)
@@ -979,7 +982,6 @@ fn main() {
         thread::sleep(sleep_duration);
     }
 
-    // ── Graceful Shutdown ──────────────────────────────────────────────────
     println!("\n[DAEMON] Terminating! Restoring hardware defaults...");
     write_opt!(node_cpu0, CPU0_DEFAULT);
     write_opt!(node_cpu4, CPU4_DEFAULT);
