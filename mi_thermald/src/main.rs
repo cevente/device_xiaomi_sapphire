@@ -11,11 +11,11 @@
 #![allow(clippy::collapsible_else_if)]
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
+#![allow(unused_imports)]
 
 use std::fs::metadata;
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -971,7 +971,7 @@ fn main() {
             if temp_delta_normalized < -100 {
                 Duration::from_secs(SLEEP_IDLE_SCREEN_OFF + 4)
             } else if temp_delta_normalized > 200 {
-                Duration::from_secs(NORMAL_SLEEP)
+                Duration::from_secs(SLEEP_NORMAL)
             } else {
                 Duration::from_secs(SLEEP_IDLE_SCREEN_OFF)
             }
@@ -981,7 +981,7 @@ fn main() {
             } else if temp_delta_normalized > 400 {
                 Duration::from_millis(1000)
             } else {
-                Duration::from_secs(NORMAL_SLEEP)
+                Duration::from_secs(SLEEP_NORMAL)
             }
         };
 
