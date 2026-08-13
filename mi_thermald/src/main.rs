@@ -2,6 +2,7 @@
 //! Optimized charging daemon supporting all charger protocols (Xiaomi HyperCharge, QC2.0, QC1.0, Std 5V).
 //! - Maximized Screen-OFF charging speeds up to a strict 42.0°C hard thermal limit (+2°C total adjustment).
 //! - Increased Screen-ON charging thermal thresholds by an additional +1.5°C for higher active current retention.
+//! - Fixed virtual sensor weights to match OEM configuration (negative weights for localized sensors)
 
 #![allow(missing_docs)]
 #![allow(clippy::needless_range_loop)]
@@ -24,6 +25,7 @@ const TZ_EMMC: &str = "/sys/class/thermal/thermal_zone21/temp";
 const TZ_BATTERY: &str = "/sys/class/thermal/thermal_zone34/temp";
 const BAT_SOC_PATH: &str = "/sys/class/power_supply/battery/capacity";
 const SCREEN_STATE_NODE: &str = "/sys/class/thermal/thermal_message/screen_state";
+const USB_ONLINE_NODE: &str = "/sys/class/power_supply/usb/online";
 
 // ── Thermal control paths ───────────────────────────────────────────────────
 const CPU0_MAX_FREQ: &str = "/sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq";
@@ -58,34 +60,52 @@ const CDSP_CUR_STATE: &str = "/sys/class/thermal/cooling_device30/cur_state";
 const ADSP_CUR_STATE: &str = "/sys/class/thermal/cooling_device37/cur_state";
 const USB_DAC_PATH: &str = "/sys/class/sound/card1";
 
-// ── Virtual sensor parameters (Optimized via RF Predictive ML) ──────────────
-const WEIGHT_QUIET: i32 = 884;
-const WEIGHT_PA: i32 = 75;
-const WEIGHT_CHARGE: i32 = 28;
-const WEIGHT_EMMC: i32 = 13;
-const WEIGHT_BATTERY: i32 = 0;
+// ── Virtual sensor parameters (FROM ORIGINAL OEM CONFIG) ──────────────────
+// These match the OEM mi_thermald configuration exactly
+const WEIGHT_QUIET: i32 = 1000;
+const WEIGHT_PA: i32 = -224;    // Negative! PA is a localized hotspot
+const WEIGHT_CHARGE: i32 = -12;  // Negative! Charge IC is localized
+const WEIGHT_EMMC: i32 = 92;
+const WEIGHT_BATTERY: i32 = 203;
 const WEIGHT_SUM: i32 = 1000;
-const COMPENSATION: i32 = 0;
+const COMPENSATION: i32 = -2893; // -2.893°C calibration offset
 
-// ── Thermal stepwise/monitor configurations ────────────────────────────────
-const CPU0_TRIG: [i32; 4] = [34000, 37000, 40000, 43000];
-const CPU0_CLR: [i32; 4] = [32000, 35000, 38000, 41000];
+// ── Thermal stepwise/monitor configurations (FROM ORIGINAL OEM CONFIG) ────
+const CPU0_TRIG: [i32; 4] = [37000, 39000, 41000, 42000];
+const CPU0_CLR: [i32; 4] = [36000, 38000, 40000, 41000];
 const CPU0_TARGET: [i32; 4] = [1804800, 1516800, 1190400, 691200];
 const CPU0_DEFAULT: i32 = 1900800;
 
-const CPU4_TRIG: [i32; 6] = [34000, 36000, 38000, 41000, 43500, 45500];
-const CPU4_CLR: [i32; 6] = [32000, 34000, 36000, 39000, 41500, 44500];
-const CPU4_TARGET: [i32; 6] = [2400000, 2208000, 1900800, 1516800, 1113600, 806400];
+const CPU4_TRIG: [i32; 6] = [32000, 34000, 36000, 39000, 41000, 42000];
+const CPU4_CLR: [i32; 6] = [31000, 33000, 35000, 38000, 40000, 41000];
+const CPU4_TARGET: [i32; 6] = [2400000, 2208000, 1766400, 1344000, 1056000, 806400];
 const CPU4_DEFAULT: i32 = 2803200;
 
-const GPU_TRIG: [i32; 3] = [43000, 45000, 46000];
-const GPU_CLR: [i32; 3] = [41000, 43000, 45000];
+const GPU_TRIG: [i32; 3] = [39000, 41000, 42000];  // FROM OEM CONFIG
+const GPU_CLR: [i32; 3] = [38000, 40000, 41000];   // FROM OEM CONFIG
 const GPU_FREQS: [i32; 7] = [1260000000, 1114800000, 1025000000, 785000000, 600000000, 465000000, 320000000];
-const GPU_TARGET_INDICES: [usize; 3] = [2, 4, 5];
+const GPU_TARGET_INDICES: [usize; 3] = [2, 4, 5];   // Target indices for GPU levels
 
-const TSTATE_TRIG: [i32; 4] = [46000, 48000, 51000, 53000];
-const TSTATE_CLR: [i32; 4] = [44000, 46000, 50000, 51000];
+// MONITOR-TEMP_STATE from OEM config
+const TSTATE_TRIG: [i32; 4] = [41000, 43000, 46000, 48000];
+const TSTATE_CLR: [i32; 4] = [40000, 42000, 45000, 46000];
 const TSTATE_TARGET: [i32; 4] = [110100000, 110100004, 112300001, 112520001];
+
+// MONITOR-WIFI-LIMIT from OEM config
+const WIFI_TRIG: i32 = 40000;
+const WIFI_CLR: i32 = 38000;
+
+// MONITOR-BACKLIGHT from OEM config
+const BL_TRIG: i32 = 45000;
+const BL_CLR: i32 = 43000;
+
+// MONITOR-CCC from OEM config
+const CCC_TRIG: i32 = 43000;
+const CCC_CLR: i32 = 41000;
+
+// MONITOR-BOOST_LIMIT from OEM config
+const BOOST_TRIG: i32 = 42000;
+const BOOST_CLR: i32 = 40000;
 
 // ── WALT String Configurations ──────────────────────────────────────────────
 const BOOST_ENABLED_STR: &str = "1190400 0 0 0 1113600 0 0 0";
@@ -198,7 +218,7 @@ macro_rules! write_str_opt {
 macro_rules! read_sensor_safe {
     ($node:expr, $last_val:expr) => {
         match $node.as_mut().and_then(|n| n.read()) {
-            Some(val) if val > 0 => {
+            Some(val) if val > 0 && val < 80000 => {
                 $last_val = val;
                 val
             }
@@ -207,11 +227,36 @@ macro_rules! read_sensor_safe {
     };
 }
 
+// ── Thermal State Logging ──────────────────────────────────────────────────
+fn log_thermal_state(virtual_temp: i32, battery_temp: i32, soc: i32, current_limit: i32, 
+                     usb_online: i32, screen_state: i32, state_cpu0: usize, state_cpu4: usize) {
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    let line = format!(
+        "[{}] V:{}°C B:{}°C C0:L{} C4:L{} CHG:{}mA SOC:{}% USB:{} SCREEN:{}\n",
+        timestamp,
+        virtual_temp / 1000,
+        battery_temp / 1000,
+        state_cpu0,
+        state_cpu4,
+        current_limit,
+        soc,
+        usb_online,
+        screen_state
+    );
+    
+    let _ = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open("/data/vendor/thermal/thermal.dump")
+        .and_then(|mut f| f.write_all(line.as_bytes()));
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 fn main() {
     println!("============================================================");
     println!(" Unified Thermal & Charging Daemon (Rust)");
-    println!(" ML-Optimized weights | Proactive Rate-of-Change Control");
+    println!(" OEM-Corrected Virtual Sensor Weights");
+    println!(" Proactive Rate-of-Change Control");
     println!(" Audio-Aware CPU Floor | Graceful Restoration | Safe-Sensors");
     println!(" Smart Idle Charge Control | Screen-ON Limits Shifted +1.5°C");
     println!("============================================================");
@@ -225,6 +270,10 @@ fn main() {
         signal(SIGTERM, handle_sig);
     }
 
+    // ── Startup Delay ─────────────────────────────────────────────────────
+    println!("[DAEMON] Waiting 5 seconds for system to stabilize...");
+    thread::sleep(Duration::from_secs(5));
+
     // Initialise cached sensor nodes
     let mut node_t_pa = SysfsNode::new(TZ_PA, true);
     let mut node_t_quiet = SysfsNode::new(TZ_QUIET, true);
@@ -233,6 +282,7 @@ fn main() {
     let mut node_t_battery = SysfsNode::new(TZ_BATTERY, true);
     let mut node_soc = SysfsNode::new(BAT_SOC_PATH, true);
     let mut node_screen = SysfsNode::new(SCREEN_STATE_NODE, true);
+    let mut node_usb_online = SysfsNode::new(USB_ONLINE_NODE, true);
 
     // Initialise cached control nodes
     let mut node_cpu0 = SysfsNode::new(CPU0_MAX_FREQ, false);
@@ -286,6 +336,7 @@ fn main() {
     let mut state_cdsp: i32 = 0;
     let mut state_adsp: i32 = 0;
     let mut last_update = Instant::now();
+    let mut last_log = Instant::now();
 
     // Baseline fallbacks
     let mut last_t_pa = 35000;
@@ -307,20 +358,23 @@ fn main() {
         
         let soc = node_soc.as_mut().and_then(|n| n.read()).unwrap_or(100);
         let screen_state = node_screen.as_mut().and_then(|n| n.read()).unwrap_or(0);
+        let usb_online = node_usb_online.as_mut().and_then(|n| n.read()).unwrap_or(0);
         let dac_connected = Path::new(USB_DAC_PATH).exists();
 
         // Read Charger protocol nodes
         let fastcharge_mode = node_fastcharge_mode.as_mut().and_then(|n| n.read()).unwrap_or(-1);
         let quick_charge_type = node_quick_charge_type.as_mut().and_then(|n| n.read()).unwrap_or(-1);
 
-        // ── Virtual temperature ──────────────────────────────────────────
+        // ── Virtual temperature (OEM-CORRECTED WEIGHTS) ──────────────────
+        // Using the exact weights from the original mi_thermald config
         let virtual_temp = (WEIGHT_QUIET * t_quiet
-            + WEIGHT_PA * t_pa
-            + WEIGHT_CHARGE * t_charge
+            + WEIGHT_PA * t_pa          // Negative! PA is a localized hotspot
+            + WEIGHT_CHARGE * t_charge  // Negative! Charge IC is localized
             + WEIGHT_EMMC * t_emmc
             + WEIGHT_BATTERY * t_battery)
             / WEIGHT_SUM
             + COMPENSATION;
+            
         let virtual_c = virtual_temp / 1000;
         let batt_temp = t_battery / 1000;
 
@@ -401,7 +455,7 @@ fn main() {
             }
         }
 
-        // ── GPU ───────────────────────────────────────────────────────────
+        // ── GPU (OEM thresholds) ─────────────────────────────────────────
         let mut new_gpu = state_gpu;
         for i in (0..3).rev() {
             if virtual_temp >= GPU_TRIG[i] && state_gpu <= i {
@@ -469,7 +523,7 @@ fn main() {
             write_opt!(node_cdsp, state_cdsp);
         }
 
-        // ── Temp State ────────────────────────────────────────────────────
+        // ── Temp State (OEM thresholds) ─────────────────────────────────
         let mut new_tstate = state_tstate;
         for i in (0..4).rev() {
             if virtual_temp >= TSTATE_TRIG[i] && state_tstate <= i {
@@ -497,54 +551,55 @@ fn main() {
             }
         }
 
-        // ── Backlight (Direct Hardware Clamp) ─────────────────────────────
-        if virtual_temp >= 51000 {
+        // ── Backlight (OEM thresholds) ────────────────────────────────────
+        if virtual_temp >= BL_TRIG {
             let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
-
             if current_bl > BL_LIMIT {
-                println!("[BACKLIGHT] Critical Temp (51°C) - Clamping brightness from {} to {}", current_bl, BL_LIMIT);
+                println!("[BACKLIGHT] Critical Temp - Clamping brightness from {} to {}", current_bl, BL_LIMIT);
                 write_opt!(node_backlight, BL_LIMIT);
                 state_backlight_clamped = true;
             }
-        } else if virtual_temp <= 49000 && state_backlight_clamped {
+        } else if virtual_temp <= BL_CLR && state_backlight_clamped {
             println!("[BACKLIGHT] Cooled down - Releasing thermal clamp");
             state_backlight_clamped = false;
         }
 
-        // ── WiFi ──────────────────────────────────────────────────────────
-        if virtual_temp >= 46000 && state_wifi == 0 {
+        // ── WiFi (OEM thresholds) ──────────────────────────────────────────
+        if virtual_temp >= WIFI_TRIG && state_wifi == 0 {
             state_wifi = 1;
             println!("[WIFI] Limited");
             write_opt!(node_wifi, 1);
-        } else if virtual_temp <= 44000 && state_wifi == 1 {
+        } else if virtual_temp <= WIFI_CLR && state_wifi == 1 {
             state_wifi = 0;
             println!("[WIFI] Limit removed");
             write_opt!(node_wifi, 0);
         }
 
-        // ── WALT Input Boost ──────────────────────────────────────────────
-        let should_disable_boost = (virtual_temp >= PROACTIVE_BOOST_TEMP_THRESHOLD) || 
+        // ── WALT Input Boost (OEM thresholds) ──────────────────────────────
+        let should_disable_boost = (virtual_temp >= BOOST_TRIG) || 
                                    (virtual_temp >= 35000 && is_thermal_spike);
         
         if should_disable_boost && state_boost == 1 {
             state_boost = 0;
             println!("[BOOST] Proactive Disable (Thermal cap reached)");
             write_str_opt!(node_walt_boost, BOOST_DISABLED_STR);
-        } else if !should_disable_boost && virtual_temp <= (PROACTIVE_BOOST_TEMP_THRESHOLD - 2000) && state_boost == 0 {
+        } else if !should_disable_boost && virtual_temp <= BOOST_CLR && state_boost == 0 {
             state_boost = 1;
             println!("[BOOST] Re-enabled WALT Input Boost");
             write_str_opt!(node_walt_boost, BOOST_ENABLED_STR);
         }
 
         // ── Hotplug ──────────────────────────────────────────────────────
-        if virtual_temp >= 49000 && !state_ccc_hotplug {
+        // MONITOR-CCC from OEM config
+        if virtual_temp >= CCC_TRIG && !state_ccc_hotplug {
             state_ccc_hotplug = true;
-            println!("[HOTPLUG-CCC] 49°C: disabling cores 2,3,6");
-        } else if virtual_temp <= 47000 && state_ccc_hotplug {
+            println!("[HOTPLUG-CCC] {}°C: disabling cores 2,3,6", virtual_temp / 1000);
+        } else if virtual_temp <= CCC_CLR && state_ccc_hotplug {
             state_ccc_hotplug = false;
             println!("[HOTPLUG-CCC] Cooled: enabling cores 2,3,6");
         }
 
+        // MONITOR-BCL from OEM config
         if soc <= 5 && !state_bcl_hotplug {
             state_bcl_hotplug = true;
             println!("[HOTPLUG-BCL] Battery <=5%: disabling cores 2,3,6");
@@ -585,8 +640,15 @@ fn main() {
             }
         }
 
-        // ── Charging Control Protocol Switching (Screen-ON thresholds shifted +1.5°C) ─────
-        if !charge_paused_at_full {
+        // ── Charging Control Protocol Switching ─────────────────────────────
+        // Check if USB is actually connected before attempting to charge
+        if usb_online == 0 {
+            // No charger connected - don't try to charge
+            write_opt!(node_res_chg, 0);
+            write_opt!(node_res_cur, 0);
+            write_opt!(node_chg_limit, 0);
+            write_opt!(node_input_suspend, 1);
+        } else if !charge_paused_at_full {
             let is_xiaomi_charger = fastcharge_mode == 1 && quick_charge_type == 3;
             let is_qc2_charger = fastcharge_mode == 0 && quick_charge_type == 2;
             let is_std_5v_charger = fastcharge_mode == 0 && quick_charge_type == 0;
@@ -780,9 +842,19 @@ fn main() {
         }
         prev_screen_state = screen_state;
 
+        // ── Thermal State Logging (once per minute) ──────────────────────
+        if now.duration_since(last_log).as_secs() >= 60 {
+            log_thermal_state(
+                virtual_temp, t_battery, soc, 
+                node_res_cur.as_ref().map(|_| 0).unwrap_or(0), // current limit placeholder
+                usb_online, screen_state, state_cpu0, state_cpu4
+            );
+            last_log = now;
+        }
+
         // ── Status Log ────────────────────────────────────────────────────
         println!(
-            "V:{}°C | B:{}°C | HVX:{}°C | Δ:{:+.1}°C/s | C0:L{} C4:L{} G:L{} CDSP:L{} ADSP:L{} DAC:{} TS:L{} BL:{} W:{} Bs:{} HP:{}{} SOC:{}% | CHG:[FM:{} QC:{}] S:{}",
+            "V:{}°C | B:{}°C | HVX:{}°C | Δ:{:+.1}°C/s | C0:L{} C4:L{} G:L{} CDSP:L{} ADSP:L{} DAC:{} TS:L{} BL:{} W:{} Bs:{} HP:{}{} SOC:{}% | CHG:[FM:{} QC:{}] USB:{} S:{}",
             virtual_c, batt_temp, t_hvx / 1000, temp_delta_normalized as f32 / 1000.0,
             state_cpu0, state_cpu4, state_gpu, state_cdsp, state_adsp,
             if dac_connected { "Y" } else { "N" }, state_tstate,
@@ -791,6 +863,7 @@ fn main() {
             if state_ccc_hotplug { "C" } else { "c" },
             if state_bcl_hotplug { "B" } else { "b" },
             soc, fastcharge_mode, quick_charge_type,
+            if usb_online == 1 { "Y" } else { "N" },
             if charge_paused_at_full { "Y" } else { "N" }
         );
 
