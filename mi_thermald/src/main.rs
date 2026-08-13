@@ -15,7 +15,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 // ── Sensor paths ────────────────────────────────────────────────────────────
 const TZ_PA: &str = "/sys/class/thermal/thermal_zone18/temp";
@@ -227,10 +227,33 @@ macro_rules! read_sensor_safe {
     };
 }
 
-// ── Thermal State Logging ──────────────────────────────────────────────────
+// ── Thermal State Logging (no chrono dependency) ──────────────────────────
+fn get_timestamp() -> String {
+    let now = SystemTime::now();
+    let since_epoch = now.duration_since(UNIX_EPOCH).unwrap_or(Duration::from_secs(0));
+    let secs = since_epoch.as_secs();
+    
+    let days = secs / 86400;
+    let secs_rem = secs % 86400;
+    let hours = secs_rem / 3600;
+    let mins = (secs_rem % 3600) / 60;
+    let secs_final = secs_rem % 60;
+    
+    // Simple format: "2024-01-15 14:30:45" based on UNIX epoch
+    // Note: This doesn't account for timezone, but works for logging
+    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", 
+        1970 + (days / 365) as u32,
+        ((days % 365) / 30) as u32 + 1,
+        (days % 30) as u32 + 1,
+        hours as u32,
+        mins as u32,
+        secs_final as u32
+    )
+}
+
 fn log_thermal_state(virtual_temp: i32, battery_temp: i32, soc: i32, current_limit: i32, 
                      usb_online: i32, screen_state: i32, state_cpu0: usize, state_cpu4: usize) {
-    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    let timestamp = get_timestamp();
     let line = format!(
         "[{}] V:{}°C B:{}°C C0:L{} C4:L{} CHG:{}mA SOC:{}% USB:{} SCREEN:{}\n",
         timestamp,
@@ -844,9 +867,11 @@ fn main() {
 
         // ── Thermal State Logging (once per minute) ──────────────────────
         if now.duration_since(last_log).as_secs() >= 60 {
+            // Read current charge limit for logging
+            let current_limit = node_res_cur.as_mut().and_then(|n| n.read()).unwrap_or(0);
             log_thermal_state(
                 virtual_temp, t_battery, soc, 
-                node_res_cur.as_ref().map(|_| 0).unwrap_or(0), // current limit placeholder
+                current_limit,
                 usb_online, screen_state, state_cpu0, state_cpu4
             );
             last_log = now;
