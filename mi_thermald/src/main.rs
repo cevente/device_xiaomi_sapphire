@@ -2,7 +2,6 @@
 //! Optimized charging daemon supporting all charger protocols (Xiaomi HyperCharge, QC2.0, QC1.0, Std 5V).
 //! - Maximized Screen-OFF charging speeds up to a strict 42.0°C hard thermal limit (+2°C total adjustment).
 //! - Increased Screen-ON charging thermal thresholds by an additional +1.5°C for higher active current retention.
-//! - OEM-corrected virtual sensor weights & thresholds (from original mi_thermald config)
 
 #![allow(missing_docs)]
 #![allow(clippy::needless_range_loop)]
@@ -59,54 +58,34 @@ const CDSP_CUR_STATE: &str = "/sys/class/thermal/cooling_device30/cur_state";
 const ADSP_CUR_STATE: &str = "/sys/class/thermal/cooling_device37/cur_state";
 const USB_DAC_PATH: &str = "/sys/class/sound/card1";
 
-// ── Virtual sensor parameters (OEM-CORRECTED from original mi_thermald) ──
-const WEIGHT_QUIET: i32 = 1000;
-const WEIGHT_PA: i32 = -224;    // PA localized hotspot
-const WEIGHT_CHARGE: i32 = -12;  // Charge IC localized hotspot
-const WEIGHT_EMMC: i32 = 92;
-const WEIGHT_BATTERY: i32 = 203;
+// ── Virtual sensor parameters (Optimized via RF Predictive ML) ──────────────
+const WEIGHT_QUIET: i32 = 884;
+const WEIGHT_PA: i32 = 75;
+const WEIGHT_CHARGE: i32 = 28;
+const WEIGHT_EMMC: i32 = 13;
+const WEIGHT_BATTERY: i32 = 0;
 const WEIGHT_SUM: i32 = 1000;
-const COMPENSATION: i32 = -2893; // -2.893°C calibration offset
+const COMPENSATION: i32 = 0;
 
-// ── Thermal stepwise/monitor configurations (OEM-CORRECTED) ────────────────
-// CPU0 – from OEM config
-const CPU0_TRIG: [i32; 4] = [37000, 39000, 41000, 42000];
-const CPU0_CLR: [i32; 4] = [36000, 38000, 40000, 41000];
+// ── Thermal stepwise/monitor configurations ────────────────────────────────
+const CPU0_TRIG: [i32; 4] = [34000, 37000, 40000, 43000];
+const CPU0_CLR: [i32; 4] = [32000, 35000, 38000, 41000];
 const CPU0_TARGET: [i32; 4] = [1804800, 1516800, 1190400, 691200];
 const CPU0_DEFAULT: i32 = 1900800;
 
-// CPU4 – from OEM config
-const CPU4_TRIG: [i32; 6] = [32000, 34000, 36000, 39000, 41000, 42000];
-const CPU4_CLR: [i32; 6] = [31000, 33000, 35000, 38000, 40000, 41000];
-const CPU4_TARGET: [i32; 6] = [2400000, 2208000, 1766400, 1344000, 1056000, 806400];
+const CPU4_TRIG: [i32; 6] = [34000, 36000, 38000, 41000, 43500, 45500];
+const CPU4_CLR: [i32; 6] = [32000, 34000, 36000, 39000, 41500, 44500];
+const CPU4_TARGET: [i32; 6] = [2400000, 2208000, 1900800, 1516800, 1113600, 806400];
 const CPU4_DEFAULT: i32 = 2803200;
 
-// GPU – from OEM config
-const GPU_TRIG: [i32; 3] = [39000, 41000, 42000];
-const GPU_CLR: [i32; 3] = [38000, 40000, 41000];
+const GPU_TRIG: [i32; 3] = [43000, 45000, 46000];
+const GPU_CLR: [i32; 3] = [41000, 43000, 45000];
 const GPU_FREQS: [i32; 7] = [1260000000, 1114800000, 1025000000, 785000000, 600000000, 465000000, 320000000];
 const GPU_TARGET_INDICES: [usize; 3] = [2, 4, 5];
 
-// Temp State – from OEM config
-const TSTATE_TRIG: [i32; 4] = [41000, 43000, 46000, 48000];
-const TSTATE_CLR: [i32; 4] = [40000, 42000, 45000, 46000];
+const TSTATE_TRIG: [i32; 4] = [46000, 48000, 51000, 53000];
+const TSTATE_CLR: [i32; 4] = [44000, 46000, 50000, 51000];
 const TSTATE_TARGET: [i32; 4] = [110100000, 110100004, 112300001, 112520001];
-
-// WiFi – from OEM config
-const WIFI_TRIG: i32 = 40000;
-const WIFI_CLR: i32 = 38000;
-
-// Backlight – from OEM config
-const BL_TRIG: i32 = 45000;
-const BL_CLR: i32 = 43000;
-
-// CCC – from OEM config
-const CCC_TRIG: i32 = 43000;
-const CCC_CLR: i32 = 41000;
-
-// Boost – from OEM config
-const BOOST_TRIG: i32 = 42000;
-const BOOST_CLR: i32 = 40000;
 
 // ── WALT String Configurations ──────────────────────────────────────────────
 const BOOST_ENABLED_STR: &str = "1190400 0 0 0 1113600 0 0 0";
@@ -115,6 +94,7 @@ const BOOST_DISABLED_STR: &str = "0 0 0 0 0 0 0 0";
 // ── Predictive control constants ──────────────────────────────────────────
 const THERMAL_SPIKE_THRESHOLD_NORMALIZED: i32 = 750;
 const PROACTIVE_CPU_TEMP_BOOST: i32 = 3000;
+const PROACTIVE_BOOST_TEMP_THRESHOLD: i32 = 34500;
 const PROACTIVE_CHG_TEMP_THRESHOLD: i32 = 38500;
 
 // ── Sleep duration constants ──────────────────────────────────────────────
@@ -125,6 +105,7 @@ const HOT_SLEEP: u64 = 1;
 // ── Signal handling with direct FFI (zero external dependencies) ────────────
 static RUNNING: AtomicBool = AtomicBool::new(true);
 
+// Signal constants (Linux/Android)
 const SIGINT: i32 = 2;
 const SIGTERM: i32 = 15;
 
@@ -132,6 +113,7 @@ extern "C" fn handle_sig(_sig: i32) {
     RUNNING.store(false, Ordering::SeqCst);
 }
 
+// Direct FFI binding to system signal function
 extern "C" {
     fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
 }
@@ -229,12 +211,15 @@ macro_rules! read_sensor_safe {
 fn main() {
     println!("============================================================");
     println!(" Unified Thermal & Charging Daemon (Rust)");
-    println!(" OEM-Corrected Virtual Sensor Weights & Thresholds");
-    println!(" Proactive Rate-of-Change Control");
+    println!(" ML-Optimized weights | Proactive Rate-of-Change Control");
     println!(" Audio-Aware CPU Floor | Graceful Restoration | Safe-Sensors");
     println!(" Smart Idle Charge Control | Screen-ON Limits Shifted +1.5°C");
     println!("============================================================");
 
+    // ── Signal Handling (zero external dependencies) ─────────────────────
+    // SAFETY: The signal function is a standard POSIX system call that is
+    // safe to call in this context. The signal handlers are simple functions
+    // that only set an atomic flag, which is safe to do in a signal context.
     unsafe {
         signal(SIGINT, handle_sig);
         signal(SIGTERM, handle_sig);
@@ -277,7 +262,7 @@ fn main() {
 
     // Initial charging state
     write_opt!(node_res_chg, 0);
-    write_opt!(node_res_cur, 3000000);
+    write_opt!(node_res_cur, 1500000);
     write_opt!(node_input_suspend, 0);
 
     write_str_opt!(node_walt_ms, "40");
@@ -292,11 +277,10 @@ fn main() {
     let mut state_backlight_clamped: bool = false;
     let mut state_wifi: i32 = 0;
     let mut state_boost: i32 = 1;
-    let mut boost_cooldown: u32 = 0;
     let mut state_ccc_hotplug: bool = false;
     let mut state_bcl_hotplug: bool = false;
-    let mut prev_hotplug_offline: Option<bool> = None;
     let mut restricted: bool = false;
+    let mut prev_screen_state: i32 = 0;
     let mut charge_paused_at_full: bool = false;
     let mut full_charge_start_time: Option<Instant> = None;
     let mut state_cdsp: i32 = 0;
@@ -329,14 +313,14 @@ fn main() {
         let fastcharge_mode = node_fastcharge_mode.as_mut().and_then(|n| n.read()).unwrap_or(-1);
         let quick_charge_type = node_quick_charge_type.as_mut().and_then(|n| n.read()).unwrap_or(-1);
 
-        // ── Virtual temperature (OEM-CORRECTED, i64 Overflow Safe) ──────
-        let weighted_sum = (WEIGHT_QUIET as i64 * t_quiet as i64)
-            + (WEIGHT_PA as i64 * t_pa as i64)
-            + (WEIGHT_CHARGE as i64 * t_charge as i64)
-            + (WEIGHT_EMMC as i64 * t_emmc as i64)
-            + (WEIGHT_BATTERY as i64 * t_battery as i64);
-
-        let virtual_temp = ((weighted_sum / WEIGHT_SUM as i64) as i32) + COMPENSATION;
+        // ── Virtual temperature ──────────────────────────────────────────
+        let virtual_temp = (WEIGHT_QUIET * t_quiet
+            + WEIGHT_PA * t_pa
+            + WEIGHT_CHARGE * t_charge
+            + WEIGHT_EMMC * t_emmc
+            + WEIGHT_BATTERY * t_battery)
+            / WEIGHT_SUM
+            + COMPENSATION;
         let virtual_c = virtual_temp / 1000;
         let batt_temp = t_battery / 1000;
 
@@ -370,7 +354,7 @@ fn main() {
             virtual_temp
         };
 
-        // ── CPU0 (Audio-Aware Floor & Fixed Clear Bug) ────────────────────
+        // ── CPU0 (Audio-Aware Floor) ─────────────────────────────────────
         let max_cpu0_idx = if dac_connected { 2 } else { 3 };
 
         if state_cpu0 > max_cpu0_idx + 1 {
@@ -393,7 +377,7 @@ fn main() {
                 state_cpu0 = i;
                 let val = if i == 0 { CPU0_DEFAULT } else { CPU0_TARGET[i - 1] };
                 println!("[CPU0] Down -> L{} ({}Hz)", state_cpu0, val);
-                write_opt!(node_cpu0, val); // FIX: Wrote val instead of CPU0_TARGET[i]
+                write_opt!(node_cpu0, val);
                 break;
             }
         }
@@ -514,54 +498,49 @@ fn main() {
         }
 
         // ── Backlight (Direct Hardware Clamp) ─────────────────────────────
-        if virtual_temp >= BL_TRIG {
+        if virtual_temp >= 51000 {
             let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
 
             if current_bl > BL_LIMIT {
-                println!("[BACKLIGHT] Critical Temp - Clamping brightness from {} to {}", current_bl, BL_LIMIT);
+                println!("[BACKLIGHT] Critical Temp (51°C) - Clamping brightness from {} to {}", current_bl, BL_LIMIT);
                 write_opt!(node_backlight, BL_LIMIT);
                 state_backlight_clamped = true;
             }
-        } else if virtual_temp <= BL_CLR && state_backlight_clamped {
+        } else if virtual_temp <= 49000 && state_backlight_clamped {
             println!("[BACKLIGHT] Cooled down - Releasing thermal clamp");
             state_backlight_clamped = false;
         }
 
         // ── WiFi ──────────────────────────────────────────────────────────
-        if virtual_temp >= WIFI_TRIG && state_wifi == 0 {
+        if virtual_temp >= 46000 && state_wifi == 0 {
             state_wifi = 1;
             println!("[WIFI] Limited");
             write_opt!(node_wifi, 1);
-        } else if virtual_temp <= WIFI_CLR && state_wifi == 1 {
+        } else if virtual_temp <= 44000 && state_wifi == 1 {
             state_wifi = 0;
             println!("[WIFI] Limit removed");
             write_opt!(node_wifi, 0);
         }
 
-        // ── WALT Input Boost (Hysteresis Guarded) ─────────────────────────
-        let should_disable_boost = (virtual_temp >= BOOST_TRIG) || 
+        // ── WALT Input Boost ──────────────────────────────────────────────
+        let should_disable_boost = (virtual_temp >= PROACTIVE_BOOST_TEMP_THRESHOLD) || 
                                    (virtual_temp >= 35000 && is_thermal_spike);
         
-        if should_disable_boost {
-            boost_cooldown = 3; // Hold disable state for 3 cycles minimum
-            if state_boost == 1 {
-                state_boost = 0;
-                println!("[BOOST] Proactive Disable (Thermal cap reached)");
-                write_str_opt!(node_walt_boost, BOOST_DISABLED_STR);
-            }
-        } else if boost_cooldown > 0 {
-            boost_cooldown -= 1;
-        } else if virtual_temp <= BOOST_CLR && state_boost == 0 {
+        if should_disable_boost && state_boost == 1 {
+            state_boost = 0;
+            println!("[BOOST] Proactive Disable (Thermal cap reached)");
+            write_str_opt!(node_walt_boost, BOOST_DISABLED_STR);
+        } else if !should_disable_boost && virtual_temp <= (PROACTIVE_BOOST_TEMP_THRESHOLD - 2000) && state_boost == 0 {
             state_boost = 1;
             println!("[BOOST] Re-enabled WALT Input Boost");
             write_str_opt!(node_walt_boost, BOOST_ENABLED_STR);
         }
 
-        // ── Hotplug (Gated Sysfs Writes) ──────────────────────────────────
-        if virtual_temp >= CCC_TRIG && !state_ccc_hotplug {
+        // ── Hotplug ──────────────────────────────────────────────────────
+        if virtual_temp >= 49000 && !state_ccc_hotplug {
             state_ccc_hotplug = true;
-            println!("[HOTPLUG-CCC] {}°C: disabling cores 2,3,6", virtual_temp / 1000);
-        } else if virtual_temp <= CCC_CLR && state_ccc_hotplug {
+            println!("[HOTPLUG-CCC] 49°C: disabling cores 2,3,6");
+        } else if virtual_temp <= 47000 && state_ccc_hotplug {
             state_ccc_hotplug = false;
             println!("[HOTPLUG-CCC] Cooled: enabling cores 2,3,6");
         }
@@ -575,21 +554,12 @@ fn main() {
         }
 
         let offline = state_ccc_hotplug || state_bcl_hotplug;
-        if prev_hotplug_offline != Some(offline) {
-            let core_val = if offline { 0 } else { 1 };
-            write_opt!(node_cpu2_on, core_val);
-            write_opt!(node_cpu3_on, core_val);
-            write_opt!(node_cpu6_on, core_val);
-            prev_hotplug_offline = Some(offline);
-        }
+        let core_val = if offline { 0 } else { 1 };
+        write_opt!(node_cpu2_on, core_val);
+        write_opt!(node_cpu3_on, core_val);
+        write_opt!(node_cpu6_on, core_val);
 
-        // ── Smart Idle Charge Control (with Auto-Resume <98% SOC) ─────────
-        if soc <= 97 && charge_paused_at_full {
-            println!("[SMART CHARGE] Battery dropped below 98%. Re-enabling input current.");
-            write_opt!(node_input_suspend, 0);
-            charge_paused_at_full = false;
-        }
-
+        // ── Smart Idle Charge Control ─────────────────────────────────────
         if soc >= 100 && screen_state == 0 && !charge_paused_at_full {
             if let Some(start_time) = full_charge_start_time {
                 if start_time.elapsed().as_secs() >= 600 {
@@ -603,7 +573,7 @@ fn main() {
                 full_charge_start_time = Some(Instant::now());
             }
         } else {
-            if full_charge_start_time.is_some() && soc < 100 {
+            if full_charge_start_time.is_some() {
                 println!("[SMART CHARGE] Charge timer interrupted. Resetting.");
                 full_charge_start_time = None;
             }
@@ -615,7 +585,7 @@ fn main() {
             }
         }
 
-        // ── Charging Control Protocol Switching ───────────────────────────
+        // ── Charging Control Protocol Switching (Screen-ON thresholds shifted +1.5°C) ─────
         if !charge_paused_at_full {
             let is_xiaomi_charger = fastcharge_mode == 1 && quick_charge_type == 3;
             let is_qc2_charger = fastcharge_mode == 0 && quick_charge_type == 2;
@@ -624,22 +594,22 @@ fn main() {
 
             if is_xiaomi_charger {
                 if screen_state == 1 {
-                    // Screen-ON Xiaomi Fast Charge (+1.5°C Shifted)
                     write_opt!(node_chg_limit, 0);
                     write_opt!(node_res_chg, 1);
 
                     let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
 
-                    let mut restrict_cur = if t_battery >= 43500 || virtual_temp >= 49000 {
-                        300000 
-                    } else if t_battery >= 42000 || virtual_temp >= 47000 {
-                        800000 
-                    } else if t_battery >= 40500 || virtual_temp >= 45000 {
-                        1200000 
-                    } else if is_thermal_spike {
+                    // Screen-ON thresholds increased by +1.5°C (+1500)
+                    let mut restrict_cur = if t_battery >= 43300 || virtual_temp >= 49000 {
+                        200000 
+                    } else if t_battery >= 41500 || virtual_temp >= 46500 {
+                        500000 
+                    } else if t_battery >= 40000 || virtual_temp >= 44500 {
                         1000000 
+                    } else if is_thermal_spike {
+                        800000 
                     } else {
-                        1800000 
+                        1500000 
                     };
 
                     if current_bl > BL_LIMIT && restrict_cur > 500000 {
@@ -649,34 +619,44 @@ fn main() {
                     write_opt!(node_res_cur, restrict_cur);
                     restricted = false;
                 } else {
-                    // Screen-OFF Xiaomi HyperCharge (Maximized Speed up to 42.0°C strict limit)
-                    if t_battery >= 42000 || virtual_temp >= 47500 {
-                        // Strict 42.0°C Hard Thermal Cap: Emergency restriction
+                    if is_thermal_spike && batt_temp >= PROACTIVE_CHG_TEMP_THRESHOLD {
                         if !restricted {
-                            println!("[CHG-XIAOMI] Hard thermal limit hit (42.0°C BATT / 47.5°C VIRT). Emergency restrict.");
+                            println!("[CHG-XIAOMI] Proactive restrict mode due to rapid thermal delta");
                             restricted = true;
                         }
-                        write_opt!(node_chg_limit, 5);
+                        write_opt!(node_chg_limit, 0);
                         write_opt!(node_res_chg, 1);
-                        write_opt!(node_res_cur, 500000);
+                        write_opt!(node_res_cur, 1500000);
+                    } else if t_battery >= 41800 || virtual_temp >= 47500 {
+                        restricted = true;
+                        write_opt!(node_chg_limit, 0);
+                        write_opt!(node_res_chg, 1);
+                        write_opt!(node_res_cur, 200000);
+                    } else if t_battery >= 41000 || virtual_temp >= 46000 {
+                        restricted = true;
+                        write_opt!(node_chg_limit, 0);
+                        write_opt!(node_res_chg, 1);
+                        write_opt!(node_res_cur, 1000000);
+                    } else if t_battery >= 40000 || virtual_temp >= 44000 {
+                        restricted = true;
+                        write_opt!(node_chg_limit, 0);
+                        write_opt!(node_res_chg, 1);
+                        write_opt!(node_res_cur, 2000000);
                     } else {
-                        // Unrestricted HyperCharge dual-pump mode (charge_control_limit driven)
                         if restricted {
-                            println!("[CHG-XIAOMI] Battery cooled below hard cap. Restoring HyperCharge dual pump.");
+                            println!("[CHG-XIAOMI] Battery cooled to {}°C - exiting direct restriction", batt_temp);
                             restricted = false;
                         }
 
                         write_opt!(node_res_chg, 0);
-                        write_opt!(node_res_cur, 3000000);
+                        write_opt!(node_res_cur, 2000000);
 
-                        let limit = if is_thermal_spike && batt_temp >= PROACTIVE_CHG_TEMP_THRESHOLD {
-                            2 // Moderate thermal bump on transient thermal spikes
-                        } else if t_battery >= 40500 || virtual_temp >= 45500 {
-                            3 // ~15W mode
-                        } else if t_battery >= 39000 || virtual_temp >= 43500 {
-                            1 // ~25W mode
+                        let limit = if t_battery >= 38500 || virtual_temp >= 42000 {
+                            4
+                        } else if t_battery >= 37000 || virtual_temp >= 40000 {
+                            1
                         } else {
-                            0 // Full 33W HyperCharge speed!
+                            0
                         };
 
                         write_opt!(node_chg_limit, limit);
@@ -689,17 +669,17 @@ fn main() {
                 if screen_state == 1 {
                     let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
 
-                    // Screen-ON QC2 (+1.5°C Shifted)
-                    let mut restrict_cur = if t_battery >= 43500 || virtual_temp >= 49000 {
-                        300000
-                    } else if t_battery >= 42000 || virtual_temp >= 46500 {
-                        600000
-                    } else if t_battery >= 40500 || virtual_temp >= 44500 {
-                        1000000
+                    // Screen-ON thresholds increased by +1.5°C (+1500)
+                    let mut restrict_cur = if t_battery >= 43300 || virtual_temp >= 49000 {
+                        200000
+                    } else if t_battery >= 41500 || virtual_temp >= 46000 {
+                        400000
+                    } else if t_battery >= 40000 || virtual_temp >= 44000 {
+                        700000
                     } else if is_thermal_spike {
-                        800000
+                        500000
                     } else {
-                        1500000 
+                        1000000 
                     };
 
                     if current_bl > BL_LIMIT && restrict_cur > 400000 {
@@ -707,17 +687,18 @@ fn main() {
                     }
                     write_opt!(node_res_cur, restrict_cur);
                 } else {
-                    // Screen-OFF QC2 (Maximized Speed up to 42.0°C strict limit)
-                    let restrict_cur = if t_battery >= 42000 || virtual_temp >= 47500 {
-                        500000
-                    } else if t_battery >= 40500 || virtual_temp >= 45500 {
-                        1200000
-                    } else if t_battery >= 39000 || virtual_temp >= 43500 {
-                        1800000
-                    } else if t_battery >= 37500 || virtual_temp >= 41500 {
-                        2400000
+                    let restrict_cur = if t_battery >= 41800 || virtual_temp >= 47500 {
+                        200000
+                    } else if t_battery >= 41000 || virtual_temp >= 46000 {
+                        800000
+                    } else if t_battery >= 40000 || virtual_temp >= 44500 {
+                        1400000
+                    } else if t_battery >= 38500 || virtual_temp >= 42500 {
+                        2000000
+                    } else if t_battery >= 37000 || virtual_temp >= 40500 {
+                        2600000
                     } else if is_thermal_spike {
-                        1500000
+                        1200000
                     } else {
                         3000000
                     };
@@ -730,17 +711,17 @@ fn main() {
                 if screen_state == 1 {
                     let current_bl = node_backlight.as_mut().and_then(|n| n.read()).unwrap_or(0);
 
-                    // Screen-ON Std 5V (+1.5°C Shifted)
-                    let mut restrict_cur = if t_battery >= 43500 || virtual_temp >= 49000 {
-                        300000 
-                    } else if t_battery >= 42000 || virtual_temp >= 46500 {
-                        600000
-                    } else if t_battery >= 40500 || virtual_temp >= 44500 {
-                        1000000
-                    } else if is_thermal_spike {
+                    // Screen-ON thresholds increased by +1.5°C (+1500)
+                    let mut restrict_cur = if t_battery >= 43300 || virtual_temp >= 49000 {
+                        200000 
+                    } else if t_battery >= 41500 || virtual_temp >= 46000 {
+                        500000
+                    } else if t_battery >= 40000 || virtual_temp >= 44000 {
                         800000
+                    } else if is_thermal_spike {
+                        600000
                     } else {
-                        1500000
+                        1200000
                     };
 
                     if current_bl > BL_LIMIT && restrict_cur > 500000 {
@@ -748,17 +729,18 @@ fn main() {
                     }
                     write_opt!(node_res_cur, restrict_cur);
                 } else {
-                    // Screen-OFF Std 5V (Maximized Speed up to 42.0°C strict limit)
-                    let restrict_cur = if t_battery >= 42000 || virtual_temp >= 47500 {
-                        500000
-                    } else if t_battery >= 40500 || virtual_temp >= 45500 {
-                        1000000
-                    } else if t_battery >= 39000 || virtual_temp >= 43500 {
-                        1800000
-                    } else if t_battery >= 37500 || virtual_temp >= 41500 {
-                        2400000
-                    } else if is_thermal_spike {
+                    let restrict_cur = if t_battery >= 41800 || virtual_temp >= 47500 {
+                        200000
+                    } else if t_battery >= 41000 || virtual_temp >= 46000 {
+                        800000
+                    } else if t_battery >= 40000 || virtual_temp >= 44500 {
                         1500000
+                    } else if t_battery >= 38500 || virtual_temp >= 42500 {
+                        2200000
+                    } else if t_battery >= 37000 || virtual_temp >= 40500 {
+                        2600000
+                    } else if is_thermal_spike {
+                        1200000
                     } else {
                         3000000
                     };
@@ -768,12 +750,13 @@ fn main() {
                 write_opt!(node_chg_limit, 0);
                 write_opt!(node_res_chg, 1);
 
-                let restrict_cur = if t_battery >= 43500 || virtual_temp >= 49000 {
-                    300000
-                } else if t_battery >= 42000 || virtual_temp >= 46500 {
-                    600000
+                // Screen-ON thresholds increased by +1.5°C (+1500)
+                let restrict_cur = if t_battery >= 43300 || virtual_temp >= 49000 {
+                    200000
+                } else if t_battery >= 41500 || virtual_temp >= 46000 {
+                    500000
                 } else if screen_state == 1 {
-                    1200000 
+                    1000000 
                 } else {
                     2500000 
                 };
@@ -782,18 +765,20 @@ fn main() {
                 write_opt!(node_chg_limit, 0);
                 write_opt!(node_res_chg, 1);
 
-                let fallback_cur = if t_battery >= 43500 {
-                    300000
-                } else if t_battery >= 42000 {
-                    700000
+                // Screen-ON thresholds increased by +1.5°C (+1500)
+                let fallback_cur = if t_battery >= 43300 {
+                    200000
+                } else if t_battery >= 41500 {
+                    600000
                 } else if screen_state == 1 {
-                    1200000 
+                    1000000 
                 } else {
                     2000000 
                 };
                 write_opt!(node_res_cur, fallback_cur);
             }
         }
+        prev_screen_state = screen_state;
 
         // ── Status Log ────────────────────────────────────────────────────
         println!(
