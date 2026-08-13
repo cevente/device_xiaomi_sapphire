@@ -130,10 +130,7 @@ struct SysfsNode {
 impl SysfsNode {
     fn new(path: &'static str, keep_open_for_read: bool) -> Option<Self> {
         let file = if keep_open_for_read {
-            match OpenOptions::new().read(true).open(path) {
-                Ok(f) => Some(f),
-                Err(_) => None,
-            }
+            OpenOptions::new().read(true).open(path).ok()
         } else {
             None
         };
@@ -206,6 +203,7 @@ fn main() {
     println!(" Asymmetric Hotplug Topology | Zero-Allocation I/O | Safe-Boot");
     println!("============================================================");
 
+    // SAFETY: Registering standard signal handlers via FFI is safe for updating the atomic run flag.
     unsafe {
         signal(SIGINT, handle_sig);
         signal(SIGTERM, handle_sig);
@@ -733,7 +731,7 @@ fn main() {
         }
         prev_screen_state = screen_state;
 
-        // ── Status Log ────────────────────────────────────────────────────
+        // ── Status Log ────────────────────────────────────────────────    
         println!(
             "V:{}°C | B:{}°C | HVX:{}°C | Δ:{:+.1}°C/s | C0:L{} C4:L{} G:L{} CDSP:L{} ADSP:L{} DAC:{} TS:L{} BL:{} W:{} Bs:{} HP:{}{} SOC:{}% | CHG:[FM:{} QC:{}] S:{}",
             virtual_c, batt_temp, t_hvx / 1000, temp_delta_normalized as f32 / 1000.0,
