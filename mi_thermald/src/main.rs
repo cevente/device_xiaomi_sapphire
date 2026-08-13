@@ -12,7 +12,7 @@
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
 #![allow(dead_code)]
-#![allow(clippy::manual_range_contains)]
+#![allow(clippy::manual_is_ascii_check)]
 
 use std::fs::metadata;
 use std::fs::OpenOptions;
@@ -216,7 +216,7 @@ impl SysfsNode {
         let mut started = false;
         
         for &b in &buf[..n] {
-            if (b'0'..=b'9').contains(&b) {
+            if b.is_ascii_digit() {
                 val = val * 10 + (b - b'0') as i32;
                 started = true;
             } else if started {
