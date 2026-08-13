@@ -11,7 +11,8 @@
 #![allow(clippy::collapsible_else_if)]
 #![allow(unused_variables)]
 #![allow(unused_assignments)]
-#![allow(unused_imports)]
+#![allow(dead_code)]
+#![allow(clippy::manual_range_contains)]
 
 use std::fs::metadata;
 use std::fs::OpenOptions;
@@ -190,29 +191,17 @@ impl DacDetector {
 struct SysfsNode {
     file: std::fs::File,
     path: &'static str,
-    read_buf: String,
 }
 
 impl SysfsNode {
     fn new(path: &'static str, read_only: bool) -> Option<Self> {
         match OpenOptions::new().read(true).write(!read_only).open(path) {
-            Ok(file) => Some(Self {
-                file,
-                path,
-                read_buf: String::with_capacity(32),
-            }),
+            Ok(file) => Some(Self { file, path }),
             Err(e) => {
                 eprintln!("Warning: Could not open {} ({})", path, e);
                 None
             }
         }
-    }
-
-    fn read(&mut self) -> Option<i32> {
-        self.file.seek(SeekFrom::Start(0)).ok()?;
-        self.read_buf.clear();
-        self.file.read_to_string(&mut self.read_buf).ok()?;
-        self.read_buf.trim().parse().ok()
     }
 
     #[inline(always)]
@@ -227,7 +216,7 @@ impl SysfsNode {
         let mut started = false;
         
         for &b in &buf[..n] {
-            if b >= b'0' && b <= b'9' {
+            if (b'0'..=b'9').contains(&b) {
                 val = val * 10 + (b - b'0') as i32;
                 started = true;
             } else if started {
@@ -314,6 +303,8 @@ fn main() {
     println!(" Audio-Aware CPU Floor | Graceful Restoration");
     println!("============================================================");
 
+    // SAFETY: signal() is a standard POSIX system call. The signal handlers
+    // only set an atomic flag, which is safe in a signal context.
     unsafe {
         signal(SIGINT, handle_sig);
         signal(SIGTERM, handle_sig);
